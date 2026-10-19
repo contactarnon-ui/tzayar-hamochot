@@ -238,7 +238,7 @@ async function api(req, env, ctx, url) {
   }
   // ניהול: רק מנהל המשחק – מחיקת כל השחקנים שאינם רובוטים
   if (p === '/api/admin/purge') {
-    if (me.name !== ADMIN_NAME || me.id.startsWith('bot_')) return err('אין הרשאה', 403);
+    if (!isAdmin(me)) return err('אין הרשאה', 403);
     const sel = `SELECT id FROM players WHERE ns=? AND id NOT LIKE 'bot_%' AND id<>?`;
     const { results } = await DB.prepare(`SELECT name FROM players WHERE ns=? AND id NOT LIKE 'bot_%' AND id<>? ORDER BY name`).bind(ns, me.id).all();
     if (m !== 'POST') return json({ names: results.map(r => r.name) });
@@ -422,7 +422,8 @@ async function runAttempt(env, ns, me, c, ds, Lin, ctx, origin, rec = null) {
 }
 
 /* ---------- שחקני מחשב ---------- */
-const ADMIN_NAME = 'ארנווש';
+// מנהל המשחק: מזוהה לפי הקוד האישי (לא לפי איות השם)
+const isAdmin = me => !me.id.startsWith('bot_') && String(me.code) === '6351' && me.name.startsWith('ארנ');
 const BOT_MAX_OPEN = 2, BOT_TOTAL_OPEN = 14;
 function b64f32(b) { return b64ToF32(b); }
 function f32b64(a) { const u = new Uint8Array(a.buffer, a.byteOffset, a.byteLength); let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); }
