@@ -945,7 +945,10 @@ function predict(){
  const p=forward(toX(d)).p,k=argmax(p),bd=blur2(d),sim=simMax(bd,byCat()[k].map(e=>e.b||(e.b=blur2(e.d)))),pass=sim>=SIM_OK,conf=p[k]*simFactor(sim);
  g.innerHTML=`<small>${pass?'זה':'אולי…'}</small><span></span><small class="num">${Math.round(conf*100)}%</small><em class="simTag ${pass?'ok':'no'}">דמיון ${Math.round(sim*100)}% · ${pass?'יזוהה באתגר':'לא יזוהה באתגר'}</em>`;g.querySelector('span').textContent=S.cats[k].w;g.className='guess lv'+LVL.get(S.cats[k].w);g.querySelector('span').style.color='var(--lc)';
  bars.innerHTML='';
- [...p].map((v,i)=>[v,i]).sort((a,b)=>b[0]-a[0]).slice(0,3).forEach(([v,i])=>{
+ // העמודות: אחוז ההתאמה האמיתי של הציור לציורים של כל מילה (לא חלוקה בין המילים)
+ const T8=[0,1,2,3,4,5,6,7].map(t=>tf8(bd,t)),bc=byCat();
+ const match=S.cats.map((_,i)=>{const ex=bc[i]||[];let m=0;for(const e of ex){const eb=e.b||(e.b=blur2(e.d));for(const t of T8)m=Math.max(m,cosSim(t,eb));}return simFactor(m);});
+ match.map((v,i)=>[v,i]).sort((a,b)=>b[0]-a[0]).slice(0,3).forEach(([v,i])=>{
   const w=S.cats[i].w,b=document.createElement('button');b.className='bar lv'+LVL.get(w);
   b.innerHTML=`<span class="nm"></span><span class="tr"><span class="fl" style="display:block;width:${(v*100).toFixed(1)}%"></span></span><span class="pc num">${Math.round(v*100)}%</span>`;
   b.querySelector('.nm').textContent=w;b.onclick=()=>teachFromTest(i);bars.appendChild(b);});
