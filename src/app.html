@@ -467,6 +467,7 @@ const NS=HM||QS.get('ns')==='test'?'test':'live',SLOT=HM?HM[1]:(QS.get('slot')||
 const KEY=`tz_${NS}_${SLOT}_`;
 const N=28,IN=N*N,H=64,LR=0.015,MIN_EX=1,MAX_EX=10,MIN_WORDS=5;
 const BASE={1:10,2:20,3:30},LVNAME={1:'פשוטה',2:'בינונית',3:'מורכבת'};
+for(const k of [1,2,3])WORDS[k]=WORDS[k].slice().sort((a,b)=>a.localeCompare(b,'he'));
 const LVL=new Map();for(const k of [1,2,3])for(const w of WORDS[k])LVL.set(w,k);
 
 /* ---------- אחסון ---------- */
@@ -733,8 +734,10 @@ function renderList(){
  const q=$('#q').value.trim(),box=$('#wordList'),c=counts();box.innerHTML='';
  let items=q?[1,2,3].flatMap(l=>WORDS[l].filter(w=>w.includes(q)).map(w=>[w,l])):WORDS[cur.lvl].map(w=>[w,cur.lvl]);
  if(!items.length){box.innerHTML='<div class="empty"><b>המילה לא במאגר</b><span>אפשר לבחור רק מילים מתוך 300 המילים של המשחק</span></div>';return;}
- const frag=document.createDocumentFragment();
- items.forEach(([w,l])=>{const k=catIndex(w),n=k>=0?c[k]:0,b=document.createElement('button');b.className='wr lv'+l+(k>=0?' in':'');
+ if(q)items.sort((a,b)=>a[0].localeCompare(b[0],'he'));
+ const frag=document.createDocumentFragment();let letter='';
+ items.forEach(([w,l])=>{if(!q&&w[0]!==letter){letter=w[0];const h=document.createElement('div');h.className='letterHd';h.textContent=letter;frag.appendChild(h);}
+  const k=catIndex(w),n=k>=0?c[k]:0,b=document.createElement('button');b.className='wr lv'+l+(k>=0?' in':'');
   b.innerHTML=`<b></b>${q?`<span class="tag">${LVNAME[l]}</span>`:''}${k>=0?`<span class="st">${meter(n,l)}<span class="num">${n}/${MAX_EX}</span></span>`:'<span class="plus"><svg class="ic"><use href="#i-plus"/></svg></span>'}`;
   b.querySelector('b').textContent=w;b.onclick=()=>openWord(w);frag.appendChild(b);});
  box.appendChild(frag);
