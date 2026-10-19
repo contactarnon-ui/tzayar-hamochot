@@ -860,7 +860,7 @@ function renderSquareList(){
  if(cur.sq==='open'){
   if(!sqCache.length){box.innerHTML=emptyHTML('אין אתגרים פתוחים','כשמישהו יפרסם מילה מהמוח שלו – היא תופיע כאן');return;}
   sqCache.forEach(c=>{const b=document.createElement('button');b.className='chRow lv'+c.lvl;
-   b.innerHTML=`<div class="grow"><div class="chWord"></div><div class="chMeta"><span class="o"></span> · ${c.k} מילים · ${c.n} ${c.n===1?'ציור':'ציורים'}</div>${c.curse&&CURSE[c.curse]?`<div class="cTag">${CURSE[c.curse].t}${c.cmult>1?` · <bdi>×${c.cmult}</bdi>`:''}</div>`:''}</div><div class="chPts num">${MODE==='ink'?`<bdi>${c.min}–${c.max}</bdi><small>נקודות</small>`:`${c.max}<small>עד</small>`}</div>`;
+   b.innerHTML=`<div class="grow"><div class="chWord"></div><div class="chMeta"><span class="o"></span> · ${c.k} מילים · ${c.n} ${c.n===1?'ציור':'ציורים'}</div>${MODE!=='ink'&&c.curse&&CURSE[c.curse]?`<div class="cTag">${CURSE[c.curse].t}${c.cmult>1?` · <bdi>×${c.cmult}</bdi>`:''}</div>`:''}</div><div class="chPts num">${MODE==='ink'?`<bdi>${c.min}–${c.max}</bdi><small>נקודות</small>`:`${c.max}<small>עד</small>`}</div>`;
    b.querySelector('.chWord').textContent=c.word;b.querySelector('.o').textContent='המוח של '+c.owner;b.onclick=()=>{cur.ch=c;go('vDraw');};box.appendChild(b);});
  }else{
   if(!mineCache.length){box.innerHTML=emptyHTML('עוד לא פרסמת אתגרים','במוח שלי ← 5 מילים לפחות ← בוחרים מילה ← פרסם אתגר');return;}

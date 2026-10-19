@@ -20,3 +20,9 @@ wi=w.replace("/*__MODE__*/'curse'","/*__MODE__*/'ink'")
 assert wi.count("/*__MODE__*/'ink'")==2, wi.count("/*__MODE__*/'ink'")
 open('/home/claude/worker-ink.js','w',encoding='utf8').write(wi.replace('// צייר המוחות – קובץ אחד','// צייר המוחות (גרסת דיו) – קובץ אחד',1))
 print('built ink')
+
+# גרסת דיו על הכתובת הראשית – אותם שחקנים ומוחות (בלי קידומת ink)
+a="return MODE === 'ink' ? 'ink' + b : b;"
+assert a in wi
+open('/home/claude/worker-ink-main.js','w',encoding='utf8').write(wi.replace(a,"return b;"))
+print('built ink-main')

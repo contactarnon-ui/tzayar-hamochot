@@ -15,7 +15,7 @@ export function sizeBonus(k) { return Math.min(2, Math.max(0, (k - MIN_WORDS) * 
 // מכפיל סיכון: ציור אחד = ×3, עשרה ציורים = ×1
 export function riskMult(n) { return Math.round((3 - (Math.min(MAX_EX, Math.max(1, n)) - 1) * 2 / 9) * 10) / 10; }
 const CURSE_MULT = { mirror: 1.5 };
-const curseMult = c => CURSE_MULT[c] || 1;
+const curseMult = c => MODE === 'ink' ? 1 : (CURSE_MULT[c] || 1);
 export function scoreFor(lvl, k, conf, ok, n, curse, extra = 1) {
   const b = BASE[lvl] || 10, m = riskMult(n) * curseMult(curse);
   return ok ? Math.max(1, Math.round(b * (1 + sizeBonus(k)) * m * extra * conf)) : -Math.round(b / 2 * m);
