@@ -415,7 +415,7 @@ async function runAttempt(env, ns, me, c, ds, Lin, ctx, origin, rec = null) {
 }
 
 /* ---------- שחקני מחשב ---------- */
-const ADMIN_NAME = 'ארנונש';
+const ADMIN_NAME = 'ארנווש';
 const BOT_MAX_OPEN = 2, BOT_TOTAL_OPEN = 14;
 function b64f32(b) { return b64ToF32(b); }
 function f32b64(a) { const u = new Uint8Array(a.buffer, a.byteOffset, a.byteLength); let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); }

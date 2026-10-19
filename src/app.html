@@ -1150,7 +1150,7 @@ const isIOS=/iPhone|iPad|iPod/.test(navigator.userAgent),standalone=matchMedia('
 $('#hMe').onclick=()=>{
  if(!ME)return;$('#meName').textContent=ME.name;$('#meCode').textContent=ME.code;
  const canPush='serviceWorker' in navigator&&'PushManager' in window&&!SIM&&!DEMO;
- $('#iosSteps').classList.toggle('hide',!(isIOS&&!standalone));$('#purgeBtn').classList.toggle('hide',ME.name!=='ארנונש'||NS!=='live');
+ $('#iosSteps').classList.toggle('hide',!(isIOS&&!standalone));$('#purgeBtn').classList.toggle('hide',ME.name!=='ארנווש'||NS!=='live');
  const pb=$('#pushBtn');pb.classList.toggle('hide',!canPush);
  pb.disabled=typeof Notification!=='undefined'&&Notification.permission==='granted';pb.innerHTML=pb.disabled?'<svg class="ic"><use href="#i-check"/></svg>התראות פעילות':'<svg class="ic"><use href="#i-bell"/></svg>הפעלת התראות';
  openSheet('#shMe');
