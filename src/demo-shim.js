@@ -72,7 +72,7 @@ async function handle(method,url,headers,body){
   const okW=new Set(cats.filter(c=>c.n>=MIN_EX).map(c=>c.w));
   db.challenges.forEach(c=>{if(c.owner_id===me.id&&c.status==='open'&&(!okW.has(c.word)||ready<MIN_WORDS))c.status='closed';});
   save(ns,db);return R({ok:true,ready});}
- if(p==='/api/square'){return R({challenges:db.challenges.filter(c=>c.status==='open'&&c.owner_id!==me.id&&!db.attempts.some(a=>a.challenge_id===c.id&&a.player_id===me.id)).slice().reverse()
+ if(p==='/api/square'){return R({challenges:db.challenges.filter(c=>c.status==='open'&&c.owner_id!==me.id&&!db.attempts.some(a=>a.challenge_id===c.id&&a.player_id===me.id&&a.ok)).slice().reverse()
   .map(c=>{const br=db.brains[c.owner_id]||{},k=br.ready_words||0,n=((br.cats?JSON.parse(br.cats):[]).find(x=>x.w===c.word)||{n:1}).n;return {id:c.id,word:c.word,lvl:c.lvl,tries:c.tries,created:c.created,curse:c.curse,owner:(P(c.owner_id)||{}).name,k,n,mult:riskMult(n),cmult:cmul(c.curse),max:maxScore(c.lvl,k,n,c.curse)};})});}
  if(p==='/api/mine'){return R({challenges:db.challenges.filter(c=>c.owner_id===me.id&&c.status!=='closed').slice().reverse().map(c=>({...c,solver:c.solved_by?(P(c.solved_by)||{}).name:null}))});}
  if(p==='/api/challenge'&&method==='POST'){
@@ -87,19 +87,19 @@ async function handle(method,url,headers,body){
  if(p==='/api/attempt'){
   const c=db.challenges.find(c=>c.id===body.id);if(!c)return E('האתגר לא נמצא',404);
   if(c.owner_id===me.id)return E('אי אפשר לאתגר את המוח של עצמך');
-  if(c.status!=='open')return E(c.status==='solved'?'מישהו כבר פתר את האתגר הזה':'האתגר נסגר');
-  if(db.attempts.some(a=>a.challenge_id===c.id&&a.player_id===me.id))return E('כבר ניסית את האתגר הזה');
+  if(c.status!=='open')return E('האתגר נסגר');
+  if(db.attempts.some(a=>a.challenge_id===c.id&&a.player_id===me.id&&a.ok))return E('כבר פתרת את האתגר הזה');
   const br=db.brains[c.owner_id],cats=br?JSON.parse(br.cats):[],k=cats.findIndex(x=>x.w===c.word);
   if(!br||!br.net||k<0)return E('המוח של בעל האתגר השתנה – האתגר נסגר');
   const ds=typeof body.d==='string'&&/^[0-9a-f]{784}$/.test(body.d)?body.d:null;let ok=false,conf=0,guess='',sim=0;
   const exK=(await unzipEx(br.ex)).filter(a=>a[0]===k).map(a=>hexD(a[1])),nEx=Math.max(1,exK.length||cats[k].n);
   if(ds){const pr=forward(br.net,ds);let g=0;for(let i=1;i<pr.length;i++)if(pr[i]>pr[g])g=i;const bd=blur2(hexD(ds)),eb=exK.map(blur2);sim=1;if(eb.length){sim=0;for(let q=0;q<8;q++){const t=tf8(bd,q);for(const e of eb)sim=Math.max(sim,cosSim(t,e));}}ok=g===k&&sim>=SIM_OK;conf=pr[k]*Math.min(1,Math.max(0,(sim-SIM_LO)/(SIM_HI-SIM_LO)));guess=g===k&&!ok?'':cats[g].w;}
   const K=cats.filter(x=>x.n>=MIN_EX).length,pts=scoreFor(c.lvl,K,conf,ok,nEx,c.curse),owner=P(c.owner_id);
-  c.tries++;if(ok){c.status='solved';c.solved_by=me.id;}
+  c.tries++;if(ok)c.solved_by=me.id;
   db.attempts.push({id:uid(),challenge_id:c.id,player_id:me.id,owner_id:c.owner_id,word:c.word,lvl:c.lvl,ok:ok?1:0,conf,guess,points:pts,k:K,created:Date.now()});
-  me.score+=pts;owner.score+=pts;
+  me.score+=pts;if(ok)owner.score+=pts;
   const pc=Math.round(conf*100),gain=ok?`קיבלת ${pts} נקודות`:`איבדת ${-pts} נקודות`;
-  db.notes.push({id:uid(),player_id:owner.id,kind:ok?'win':'lose',text:ok?`${me.name} צייר "${c.word}" – המוח שלך זיהה ב־${pc}%. ${gain}`:guess?`${me.name} צייר "${c.word}" – המוח שלך חשב שזה "${guess}". ${gain}`:`${me.name} צייר "${c.word}" – לא דומה מספיק לציורים שלך. ${gain}`,points:pts,seen:0,created:Date.now()});
+  db.notes.push({id:uid(),player_id:owner.id,kind:ok?'win':'lose',text:ok?`${me.name} צייר "${c.word}" – המוח שלך זיהה ב־${pc}%. ${gain}`:guess?`${me.name} צייר "${c.word}" – המוח שלך חשב שזה "${guess}". לא הפסדת נקודות`:`${me.name} צייר "${c.word}" – לא דומה מספיק לציורים שלך. לא הפסדת נקודות`,points:ok?pts:0,seen:0,created:Date.now()});
   db.notes.push({id:uid(),player_id:me.id,kind:ok?'dwin':'dlose',text:ok?`המוח של ${owner.name} זיהה את "${c.word}" שלך ב־${pc}%. ${gain}`:`המוח של ${owner.name} לא זיהה את "${c.word}" שלך. ${gain}`,points:pts,seen:0,created:Date.now()});
   save(ns,db);return R({ok,conf,guess,sim,n:nEx,mult:riskMult(nEx),cmult:cmul(c.curse),points:pts,k:K,lvl:c.lvl,word:c.word,owner:owner.name,empty:!ds});}
  return E('לא נמצא',404);

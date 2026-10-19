@@ -995,14 +995,14 @@ function renderSquareList(){
   if(!sqCache.length){box.innerHTML=emptyHTML('אין אתגרים פתוחים','כשמישהו יפרסם מילה מהמוח שלו – היא תופיע כאן');return;}
   sqCache.forEach(c=>{const b=document.createElement('button');b.className='chRow lv'+c.lvl;
    b.innerHTML=`<div class="grow"><div class="chWord"></div><div class="chMeta"><span class="o"></span> · ${c.k} מילים · ${c.n} ${c.n===1?'ציור':'ציורים'}</div>${MODE!=='ink'&&c.curse&&CURSE[c.curse]?`<div class="cTag">${CURSE[c.curse].t}${c.cmult>1?` · <bdi>×${c.cmult}</bdi>`:''}</div>`:''}</div><div class="chPts num">${MODE==='ink'?`<bdi>${c.min}–${c.max}</bdi><small>נקודות</small>`:`${c.max}<small>עד</small>`}</div>`;
-   b.querySelector('.chWord').textContent=c.word;b.querySelector('.o').textContent='המוח של '+c.owner;if(c.bot)b.querySelector('.o').insertAdjacentHTML('afterend','<em class="botTag"><svg class="ic"><use href="#i-bot"/></svg>מחשב</em>');b.onclick=()=>{cur.ch=c;go('vDraw');};box.appendChild(b);});
+   b.querySelector('.chWord').textContent=c.word;b.querySelector('.o').textContent='המוח של '+c.owner;if(c.my)b.querySelector('.chMeta').insertAdjacentHTML('beforeend',` · <span style="color:var(--bad)">ניסית ${c.my===1?'פעם אחת':c.my+' פעמים'}</span>`);if(c.bot)b.querySelector('.o').insertAdjacentHTML('afterend','<em class="botTag"><svg class="ic"><use href="#i-bot"/></svg>מחשב</em>');b.onclick=()=>{cur.ch=c;go('vDraw');};box.appendChild(b);});
  }else{
   if(!mineCache.length){box.innerHTML=emptyHTML('עוד לא פרסמת אתגרים','במוח שלי ← 5 מילים לפחות ← בוחרים מילה ← פרסם אתגר');return;}
   mineCache.forEach(c=>{const r=document.createElement('div');r.className='chRow lv'+c.lvl;
    r.innerHTML=`<div class="grow"><div class="chWord"></div><div class="chMeta"></div></div>`;
    r.querySelector('.chWord').textContent=c.word;
    const m=r.querySelector('.chMeta');
-   if(c.status==='open'){m.innerHTML=`<span class="chSt open">פתוח</span> · ${c.tries} ניסיונות · ${ago(c.created)}`;const x=document.createElement('button');x.className='xBtn';x.setAttribute('aria-label','הסרת האתגר');x.innerHTML='<svg class="ic"><use href="#i-x"/></svg>';x.onclick=async()=>{if(!await ask(`להסיר את "${c.word}" מהכיכר?`,'שחקנים כבר לא יוכלו לנסות אותה.','הסרה'))return;try{await api('challenge/'+c.id,{method:'DELETE'});await loadMine();}catch(e){toast(e.message);}};r.appendChild(x);}
+   if(c.status==='open'){m.innerHTML=`<span class="chSt open">פתוח</span> · ${c.tries} ניסיונות${c.solves?` · <span class="chSt solved">${c.solves===1?'פתר אחד':`פתרו ${c.solves}`}</span>`:''} · ${ago(c.created)}`;const x=document.createElement('button');x.className='xBtn';x.setAttribute('aria-label','הסרת האתגר');x.innerHTML='<svg class="ic"><use href="#i-x"/></svg>';x.onclick=async()=>{if(!await ask(`להסיר את "${c.word}" מהכיכר?`,'שחקנים כבר לא יוכלו לנסות אותה.','הסרה'))return;try{await api('challenge/'+c.id,{method:'DELETE'});await loadMine();}catch(e){toast(e.message);}};r.appendChild(x);}
    else{m.innerHTML=`<span class="chSt solved">נפתר</span> · <span class="s"></span> · ${c.tries} ניסיונות`;m.querySelector('.s').textContent='ע״י '+(c.solver||'');}
    if(c.tries>0){const v=document.createElement('button');v.className='recBtn';v.innerHTML='<svg class="ic"><use href="#i-pen"/></svg>צפה בציורים';v.onclick=()=>openRecs(c);r.querySelector('.grow').appendChild(v);}
    box.appendChild(r);});
@@ -1013,7 +1013,7 @@ function renderSquareList(){
 function renderDraw(){
  const c=cur.ch;$('#vDraw').className='view on lv'+c.lvl;$('#dRes').classList.add('hide');REC=[];recT0=0;
  $('#dWord').textContent=c.word;$('#dPts').className='chPts'+(MODE==='ink'?' live':'');liveShown=-1;if(MODE==='ink')paintLive();else $('#dPts').innerHTML=`${c.max}<small>עד</small>`;
- $('#dSub').textContent=`המוח של ${c.owner} ישפוט · ${c.k} מילים · ${c.n} ${c.n===1?'ציור':'ציורים'} · מכפיל ${c.mult} · ניסיון אחד`;paintCurse();
+ $('#dSub').textContent=`המוח של ${c.owner} ישפוט · ${c.k} מילים · ${c.n} ${c.n===1?'ציור':'ציורים'} · מכפיל ${c.mult} · ${c.my?`ניסיון ${c.my+1}`:'אפשר לנסות שוב'}`;paintCurse();
  $('#dSend').disabled=false;$('#dSend').innerHTML='<svg class="ic"><use href="#i-send"/></svg>'+SEND_LABEL;
 }
 $('#dSend').onclick=async()=>{
@@ -1025,12 +1025,13 @@ $('#dSend').onclick=async()=>{
 };
 function showResult(r,d){
  const box=$('#dRes'),pc=Math.round(r.conf*100);box.className='result '+(r.ok?'win':'lose');
- box.innerHTML=`<div class="badge"><svg class="ic"><use href="#i-${r.ok?'check':'x'}"/></svg></div><h2>${r.ok?'המוח זיהה!':'המוח לא זיהה'}</h2><p></p><canvas class="mini"></canvas><div class="pts num"><bdi>${r.points<0?'−'+(-r.points):r.points}</bdi><small>נקודות</small></div><div class="formula"></div><button class="btn dark" id="resBack">חזרה לכיכר</button>`;
+ box.innerHTML=`<div class="badge"><svg class="ic"><use href="#i-${r.ok?'check':'x'}"/></svg></div><h2>${r.ok?'המוח זיהה!':'המוח לא זיהה'}</h2><p></p><canvas class="mini"></canvas><div class="pts num"><bdi>${r.points<0?'−'+(-r.points):r.points}</bdi><small>נקודות</small></div><div class="formula"></div>${r.ok?'':'<button class="btn pri" id="resAgain" style="margin-bottom:8px">נסה שוב</button>'}<button class="btn dark" id="resBack">חזרה לכיכר</button>`;
  const sp=Math.round((r.sim||0)*100);
  box.querySelector('p').textContent=r.empty?'לא צויר כלום':r.ok?`המוח של ${r.owner} זיהה "${r.word}" · דמיון ${sp}% לציורים שלו`:r.guess?`המוח של ${r.owner} חשב שזה "${r.guess}"`:`המוח ניחש "${r.word}", אבל הציור דומה רק ${sp}% לציורים של ${r.owner} (צריך 70%)`;
- box.querySelector('.formula').textContent=r.ok?`${pc}% × ${r.mult} (${r.n} ${r.n===1?'ציור':'ציורים'})${r.imult>1?` × ${r.imult} (דיו ${Math.round((r.inkR||1)*100)}%)`:''}${r.cmult>1?` × ${r.cmult} (מראה)`:''} × ${(1+sizeBonus(r.k)).toFixed(2)} (${r.k} מילים) × ${BASE[r.lvl]} · אותו ניקוד גם ל${r.owner}`:`שניכם מאבדים ${-r.points} נקודות (מכפיל ${Math.round(r.mult*(r.cmult||1)*10)/10})`;
+ box.querySelector('.formula').textContent=r.ok?`${pc}% × ${r.mult} (${r.n} ${r.n===1?'ציור':'ציורים'})${r.imult>1?` × ${r.imult} (דיו ${Math.round((r.inkR||1)*100)}%)`:''}${r.cmult>1?` × ${r.cmult} (מראה)`:''} × ${(1+sizeBonus(r.k)).toFixed(2)} (${r.k} מילים) × ${BASE[r.lvl]} · אותו ניקוד גם ל${r.owner}`:`איבדת ${-r.points} נקודות (מכפיל ${Math.round(r.mult*(r.cmult||1)*10)/10}) · ${r.owner} לא מפסיד · אפשר לנסות שוב`;
  const mini=box.querySelector('.mini');if(d)thumb(d,mini);else mini.remove();
  box.querySelector('#resBack').onclick=()=>{cur.stack=[];go('vSquare',false);};
+ const ag=box.querySelector('#resAgain');if(ag)ag.onclick=()=>{cur.ch.my=(cur.ch.my||0)+1;padLocked=false;clearPad();renderDraw();};
 }
 
 /* ---------- צפייה בציור של מי שניסה את האתגר ---------- */

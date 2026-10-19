@@ -124,6 +124,9 @@ async function ensureRecs(DB) {
   if (recsReady) return;
   await DB.prepare('CREATE TABLE IF NOT EXISTS recs (attempt_id TEXT PRIMARY KEY, ns TEXT NOT NULL, note_id TEXT, rec TEXT, created INTEGER NOT NULL)').run();
   await DB.prepare('CREATE INDEX IF NOT EXISTS recs_note ON recs(note_id)').run();
+  // אפשר לנסות שוב אחרי כישלון – מבטלים את ההגבלה של ניסיון אחד
+  await DB.prepare('DROP INDEX IF EXISTS att_once').run();
+  await DB.prepare('CREATE INDEX IF NOT EXISTS att_cp ON attempts(challenge_id, player_id)').run();
   recsReady = true;
 }
 
@@ -273,10 +276,10 @@ async function api(req, env, ctx, url) {
   }
 
   if (p === '/api/square') {
-    const { results } = await DB.prepare(`SELECT c.id,c.word,c.lvl,c.tries,c.created,c.curse,o.name owner,(c.owner_id LIKE 'bot_%') bot,COALESCE(b.ready_words,0) k,b.cats,b.ex
+    const { results } = await DB.prepare(`SELECT c.id,c.word,c.lvl,c.tries,c.created,c.curse,o.name owner,(c.owner_id LIKE 'bot_%') bot,COALESCE(b.ready_words,0) k,b.cats,b.ex,(SELECT COUNT(*) FROM attempts a2 WHERE a2.challenge_id=c.id AND a2.player_id=?) my
       FROM challenges c JOIN players o ON o.id=c.owner_id LEFT JOIN brains b ON b.player_id=c.owner_id
-      WHERE c.ns=? AND c.status='open' AND c.owner_id<>? AND NOT EXISTS (SELECT 1 FROM attempts a WHERE a.challenge_id=c.id AND a.player_id=?)
-      ORDER BY c.created DESC LIMIT 60`).bind(ns, me.id, me.id).all();
+      WHERE c.ns=? AND c.status='open' AND c.owner_id<>? AND NOT EXISTS (SELECT 1 FROM attempts a WHERE a.challenge_id=c.id AND a.player_id=? AND a.ok=1)
+      ORDER BY c.created DESC LIMIT 60`).bind(me.id, ns, me.id, me.id).all();
     const exCache = new Map();
     const out = await Promise.all(results.map(async c => {
       const cats = c.cats ? JSON.parse(c.cats) : [], k = cats.findIndex(x => x.w === c.word), n = (cats[k] || { n: 1 }).n;
@@ -289,7 +292,7 @@ async function api(req, env, ctx, url) {
     return json({ challenges: out });
   }
   if (p === '/api/mine') {
-    const { results } = await DB.prepare(`SELECT c.id,c.word,c.lvl,c.status,c.tries,c.created,c.curse,s.name solver FROM challenges c LEFT JOIN players s ON s.id=c.solved_by
+    const { results } = await DB.prepare(`SELECT c.id,c.word,c.lvl,c.status,c.tries,c.created,c.curse,s.name solver,(SELECT COUNT(*) FROM attempts a WHERE a.challenge_id=c.id AND a.ok=1) solves FROM challenges c LEFT JOIN players s ON s.id=c.solved_by
       WHERE c.owner_id=? AND c.status<>'closed' ORDER BY c.status='open' DESC, c.created DESC LIMIT 60`).bind(me.id).all();
     return json({ challenges: results });
   }
@@ -304,7 +307,7 @@ async function api(req, env, ctx, url) {
     const c = JSON.parse(br.cats).find(c => c.w === word);
     if (!c || c.n < MIN_EX) return err(`למילה צריך לפחות ${MIN_EX} ציורים`);
     if (await DB.prepare(`SELECT 1 FROM challenges WHERE owner_id=? AND word=? AND status='open'`).bind(me.id, word).first()) return err('המילה הזאת כבר באתגר');
-    if (await DB.prepare(`SELECT 1 FROM challenges WHERE owner_id=? AND word=? AND status='solved'`).bind(me.id, word).first()) return err('המילה הזאת כבר נפתרה – אי אפשר לפרסם אותה שוב');
+    if (await DB.prepare(`SELECT 1 FROM attempts WHERE owner_id=? AND word=? AND ok=1 LIMIT 1`).bind(me.id, word).first()) return err('המילה הזאת כבר נפתרה – אי אפשר לפרסם אותה שוב');
     const id = uid();
     const curse = MODE === 'ink' ? null : CURSES[Math.floor(Math.random() * CURSES.length)];
     await DB.prepare('INSERT INTO challenges(id,ns,owner_id,word,lvl,status,tries,created,curse) VALUES(?,?,?,?,?,\'open\',0,?,?)').bind(id, ns, me.id, word, lvl, now(), curse).run();
@@ -334,8 +337,9 @@ const isBot = id => typeof id === 'string' && id.startsWith('bot_');
 async function runAttempt(env, ns, me, c, ds, Lin, ctx, origin, rec = null) {
   const DB = env.DB;
   if (c.owner_id === me.id) return { error: 'אי אפשר לאתגר את המוח של עצמך' };
-  if (c.status !== 'open') return { error: c.status === 'solved' ? 'מישהו כבר פתר את האתגר הזה' : 'האתגר נסגר' };
-  if (await DB.prepare('SELECT 1 FROM attempts WHERE challenge_id=? AND player_id=?').bind(c.id, me.id).first()) return { error: 'כבר ניסית את האתגר הזה' };
+  if (c.status !== 'open') return { error: 'האתגר נסגר' };
+  await ensureRecs(DB);
+  if (await DB.prepare('SELECT 1 FROM attempts WHERE challenge_id=? AND player_id=? AND ok=1').bind(c.id, me.id).first()) return { error: 'כבר פתרת את האתגר הזה' };
   const br = await DB.prepare('SELECT cats,ready_words,net,ex FROM brains WHERE player_id=?').bind(c.owner_id).first();
   const cats = br ? JSON.parse(br.cats) : [];
   const k = cats.findIndex(x => x.w === c.word);
@@ -352,12 +356,13 @@ async function runAttempt(env, ns, me, c, ds, Lin, ctx, origin, rec = null) {
     ok = g === k && sim >= SIM_OK; conf = prob * simFactor(sim); guess = g === k && !ok ? '' : cats[g].w;
   }
   const K = cats.filter(x => x.n >= MIN_EX).length, pts = scoreFor(c.lvl, K, conf, ok, nEx, c.curse, im);
-  // רובוט שנכשל באתגר של שחקן אמיתי – השחקן לא מפסיד
-  const ownerPts = (!ok && isBot(me.id) && !isBot(c.owner_id)) ? 0 : pts;
-  if (ok) {
-    const upd = await DB.prepare(`UPDATE challenges SET status='solved',solved_by=?,closed_at=?,tries=tries+1 WHERE id=? AND status='open'`).bind(me.id, now(), c.id).run();
-    if (!upd.meta.changes) return { error: 'מישהו פתר את האתגר שנייה לפניך' };
-  } else await DB.prepare('UPDATE challenges SET tries=tries+1 WHERE id=?').bind(c.id).run();
+  // כישלון מוריד נקודות רק למי שמצייר; בעל המוח לא מפסיד
+  const ownerPts = ok ? pts : 0;
+  // האתגר נשאר פתוח גם אחרי הצלחה (נעלם רק אצל מי שפתר). solved_by = הפותר האחרון
+  if (ok) await DB.prepare('UPDATE challenges SET tries=tries+1,solved_by=? WHERE id=?').bind(me.id, c.id).run();
+  else await DB.prepare('UPDATE challenges SET tries=tries+1 WHERE id=?').bind(c.id).run();
+  // אתגר של רובוט נסגר אחרי 3 פותרים, כדי שיתחלפו אתגרים
+  if (ok && isBot(c.owner_id)) { const sv = await DB.prepare('SELECT COUNT(*) n FROM attempts WHERE challenge_id=? AND ok=1').bind(c.id).first(); if (sv.n >= 2) await DB.prepare(`UPDATE challenges SET status='closed',closed_at=? WHERE id=?`).bind(now(), c.id).run(); }
   const aid = uid();
   await DB.batch([
     DB.prepare('INSERT INTO attempts(id,ns,challenge_id,player_id,owner_id,word,lvl,ok,conf,guess,points,k,d,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
