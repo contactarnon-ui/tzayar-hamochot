@@ -162,9 +162,7 @@ body.solo nav,body.solo #hScore,body.solo #hBell,body.solo #hMe,body.solo #wPub{
 .hint{font-size:13.5px;color:var(--ink2);text-align:center}
 .linkBtn{color:var(--accent);font-weight:600;font-size:14px;text-decoration:underline;text-underline-offset:3px;padding:4px 2px}
 .letterHd{position:sticky;top:0;z-index:1;padding:4px 14px;background:var(--paper2);color:var(--ink2);font-weight:700;font-size:14px}
-.pickGrid{display:flex;flex-wrap:wrap;gap:8px;overflow-y:auto;padding-bottom:4px}
-.pickGrid .mw{height:46px}
-.pickGrid .mw:disabled{opacity:.45}
+.wr:disabled{opacity:.45}
 .simTag{display:block;width:100%;font-style:normal;font-size:14px;font-weight:600;text-align:center}
 .guess{flex-wrap:wrap;row-gap:2px}
 .simTag.ok{color:var(--ok)}.simTag.no{color:var(--bad)}
@@ -433,7 +431,7 @@ bdi{unicode-bidi:isolate;direction:ltr}
  <button class="btn" id="logout">התנתקות</button>
 </div>
 <div class="sheet" id="shAsk"><div class="grab"></div><h3 id="askT"></h3><p id="askP" style="color:var(--ink2);font-size:16px"></p><div class="row"><button class="btn grow" id="askNo">ביטול</button><button class="btn pri grow" id="askYes">אישור</button></div></div>
-<div class="sheet" id="shPick"><div class="grab"></div><h3>מה ציירת?</h3><p style="color:var(--ink2);font-size:15px">בחרו את המילה – הציור יישמר אליה</p><div class="pickGrid" id="pickGrid"></div></div>
+<div class="sheet tall" id="shPick"><div class="grab"></div><h3>מה ציירת?</h3><div class="search"><label><svg class="ic"><use href="#i-search"/></svg><input id="pickQ" placeholder="חיפוש בכל 300 המילים" enterkeyhint="search"></label></div><div class="list" id="pickGrid"></div></div>
 <div class="sheet tall" id="shMine"><div class="grab"></div><h3 id="mineTitle">המילים שלי</h3><div class="search"><label><svg class="ic"><use href="#i-search"/></svg><input id="mineQ" placeholder="חיפוש במילים שלי"></label></div><div class="list" id="mineList"></div></div>
 <div id="toast"></div>
 <div id="desk"><div><svg viewBox="0 0 64 64"><use href="#mascotBig"/></svg><h1>צייר המוחות</h1><p>המשחק בנוי לטלפון.<br>פתחו את הכתובת הזאת בנייד:</p><p class="num" style="font-weight:600;color:var(--ink);direction:ltr">__ORIGIN__</p></div></div>
@@ -820,12 +818,24 @@ function predict(){
 }
 $('#tOther').onclick=()=>{
  if(!lastTestD){toast('ציירו קודם, ואז בחרו את המילה');return;}
- const box=$('#pickGrid'),c=counts();box.innerHTML='';
- S.cats.forEach((x,i)=>{const lv=LVL.get(x.w),b=document.createElement('button');b.className='mw lv'+lv;b.disabled=c[i]>=MAX_EX;
-  b.innerHTML=`<span></span><small class="num">${c[i]}/${MAX_EX}</small>`;b.querySelector('span').textContent=x.w;
-  b.onclick=()=>{closeSheets();teachFromTest(i);};box.appendChild(b);});
- openSheet('#shPick');
+ $('#pickQ').value='';renderPick();openSheet('#shPick');
 };
+$('#pickQ').addEventListener('input',renderPick);
+function renderPick(){
+ const q=$('#pickQ').value.trim(),c=counts(),box=$('#pickGrid');box.innerHTML='';
+ let items;
+ if(q)items=[1,2,3].flatMap(l=>WORDS[l].filter(w=>w.includes(q)).map(w=>[w,l]));
+ else items=S.cats.map(x=>[x.w,LVL.get(x.w)]).sort((a,b)=>a[0].localeCompare(b[0],'he'));
+ if(!q&&items.length){const h=document.createElement('div');h.className='letterHd';h.textContent='המילים שבמוח · או חפשו מילה חדשה';box.appendChild(h);}
+ if(!items.length){box.innerHTML='<div class="empty"><b>המילה לא במאגר</b><span>אפשר לבחור רק מתוך 300 המילים של המשחק</span></div>';return;}
+ const frag=document.createDocumentFragment();
+ items.forEach(([w,l])=>{const k=catIndex(w),n=k>=0?c[k]:0,b=document.createElement('button');b.className='wr lv'+l+(k>=0?' in':'');b.disabled=n>=MAX_EX;
+  b.innerHTML=`<b></b>${k>=0?`<span class="st">${meter(n,l)}<span class="num">${n}/${MAX_EX}</span></span>`:`<span class="tag">${LVNAME[l]} · חדשה</span>`}`;
+  b.querySelector('b').textContent=w;
+  b.onclick=()=>{closeSheets();const kk=ensureCat(w);teachFromTest(kk);if(cur.view==='vRoom')renderRoom();};
+  frag.appendChild(b);});
+ box.appendChild(frag);
+}
 function teachFromTest(k){
  if(!lastTestD)return;if(byCat()[k].length>=MAX_EX){toast(`"${S.cats[k].w}" כבר מלאה (10/10)`);return;}
  S.ex.push({c:k,d:lastTestD,L:lastL});dirty();kickTrain();toast(`תודה! המוח ילמד שזה "${S.cats[k].w}"`);clearPad();$('#tGuess').innerHTML='';$('#tBars').innerHTML='';lastTestD=null;
