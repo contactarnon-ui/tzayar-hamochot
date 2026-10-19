@@ -1,0 +1,10 @@
+name = "tzayar-hamochot"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+keep_vars = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "tzayar-hamochot"
+database_id = "3de513c5-fdf6-498c-a910-2885fe8e8795"

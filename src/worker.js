@@ -1,0 +1,353 @@
+// צייר המוחות – Cloudflare Worker (D1 + Web Push)
+import { WORDS } from './words.js';
+import APP from './app.html';
+import SIM from './sim.html';
+import { ICONS } from './icons.js';
+
+const N = 28, IN = N * N;
+const MIN_EX = 1, MAX_EX = 10, MIN_WORDS = 5;
+const BASE = { 1: 10, 2: 20, 3: 30 };
+const LVL = new Map();
+for (const k of ['1', '2', '3']) for (const w of WORDS[k]) LVL.set(w, +k);
+
+/* ---------- ניקוד ---------- */
+export function sizeBonus(k) { return Math.min(2, Math.max(0, (k - MIN_WORDS) * 0.05)); }
+// מכפיל סיכון: ציור אחד = ×3, עשרה ציורים = ×1
+export function riskMult(n) { return Math.round((3 - (Math.min(MAX_EX, Math.max(1, n)) - 1) * 2 / 9) * 10) / 10; }
+const CURSE_MULT = { mirror: 1.5 };
+const curseMult = c => CURSE_MULT[c] || 1;
+export function scoreFor(lvl, k, conf, ok, n, curse, extra = 1) {
+  const b = BASE[lvl] || 10, m = riskMult(n) * curseMult(curse);
+  return ok ? Math.max(1, Math.round(b * (1 + sizeBonus(k)) * m * extra * conf)) : -Math.round(b / 2 * m);
+}
+function maxScore(lvl, k, n, curse) { return Math.round((BASE[lvl] || 10) * (1 + sizeBonus(k)) * riskMult(n) * curseMult(curse)); }
+const CURSES = ['line', 'three', 'mirror', 'white', 'time', 'straight', 'flip', 'rotate', 'shaky', 'dots', 'fade', 'tiny', 'fat'];
+/* דמיון: הציור מושווה לציורים שבעל המוח שמר למילה */
+const SIM_OK = 0.7, SIM_LO = 0.55, SIM_HI = 0.9;
+function blur2(d) { let o = Float32Array.from(d); for (let pass = 0; pass < 2; pass++) { const n = new Float32Array(IN); for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { let s = 0, c = 0; for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) { const yy = y + a, xx = x + b; if (yy < 0 || yy >= N || xx < 0 || xx >= N) continue; s += o[yy * N + xx]; c++; } n[y * N + x] = s / c; } o = n; } return o; }
+function cosSim(a, b) { let s = 0, x = 0, y = 0; for (let i = 0; i < a.length; i++) { s += a[i] * b[i]; x += a[i] * a[i]; y += b[i] * b[i]; } return s / Math.sqrt(x * y + 1e-9); }
+function simTo(d, exs) { const bd = blur2(d); let m = 0; for (const e of exs) m = Math.max(m, cosSim(bd, blur2(e))); return m; }
+const simFactor = s => Math.min(1, Math.max(0, (s - SIM_LO) / (SIM_HI - SIM_LO)));
+async function unzipEx(b) {
+  if (!b) return [];
+  if (b[0] === 'P') return JSON.parse(decodeURIComponent(escape(atob(b.slice(1)))));
+  const s = atob(b.slice(1)), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+  const ds = new Blob([u]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  return JSON.parse(await new Response(ds).text());
+}
+
+/* ---------- רשת עצבית (שיפוט) ---------- */
+function b64ToF32(b) {
+  const s = atob(b), u = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+  return new Float32Array(u.buffer);
+}
+function strToD(s) {
+  const d = new Uint8Array(IN);
+  for (let i = 0; i < IN; i++) d[i] = parseInt(s[i], 16) || 0;
+  return d;
+}
+function forward(net, d) {
+  const H = net.H, W1 = net.W1, h = new Float32Array(H);
+  const nz = []; for (let i = 0; i < IN; i++) if (d[i]) nz.push(i);
+  for (let j = 0; j < H; j++) {
+    let s = net.b1[j]; const o = j * IN;
+    for (const i of nz) s += W1[o + i] * (d[i] / 15);
+    h[j] = s > 0 ? s : 0;
+  }
+  const K = net.W2.length, p = new Float32Array(K); let m = -1e9;
+  for (let k = 0; k < K; k++) { let s = net.b2[k]; const w = net.W2[k]; for (let j = 0; j < H; j++) s += w[j] * h[j]; p[k] = s; if (s > m) m = s; }
+  let sum = 0; for (let k = 0; k < K; k++) { p[k] = Math.exp(p[k] - m); sum += p[k]; }
+  for (let k = 0; k < K; k++) p[k] /= sum;
+  return p;
+}
+function decodeNet(json) {
+  const o = JSON.parse(json);
+  return { H: o.H, W1: b64ToF32(o.W1), b1: b64ToF32(o.b1), W2: o.W2.map(b64ToF32), b2: o.b2 };
+}
+
+/* ---------- עזרים ---------- */
+const now = () => Date.now();
+const uid = () => crypto.randomUUID();
+function json(o, status = 200) {
+  return new Response(JSON.stringify(o), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
+}
+const err = (msg, status = 400) => json({ error: msg }, status);
+const MODE = /*__MODE__*/'curse';
+function nsOf(url) { const b = url.searchParams.get('ns') === 'test' ? 'test' : 'live'; return MODE === 'ink' ? 'ink' + b : b; }
+// דיו: יחס בין אורך הקו של המצייר לאורך הקו בציורים של בעל המוח
+const INK_MAX = 10, DEF_L = 3;
+function inkMult(r) { return Math.round((1 + (INK_MAX - 1) * Math.min(1, Math.max(0, (1 - r) / 0.85))) * 10) / 10; }
+function medL(rows) { const Ls = rows.map(a => +a[2]).filter(x => x > 0).sort((x, y) => x - y); return Ls.length ? Ls[Ls.length >> 1] : DEF_L; }
+async function body(req) { try { return await req.json(); } catch { return {}; } }
+async function auth(req, env, ns) {
+  const t = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
+  if (!t) return null;
+  return env.DB.prepare('SELECT id,name,code,score FROM players WHERE token=? AND ns=?').bind(t, ns).first();
+}
+function cleanName(n) { return String(n || '').replace(/\s+/g, ' ').trim().slice(0, 14); }
+function b64url(buf) { let s = ''; for (const x of new Uint8Array(buf)) s += String.fromCharCode(x); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+
+/* ---------- Web Push (VAPID, בלי תוכן – ה-Service Worker מושך את ההודעה) ---------- */
+async function vapidAuth(env, endpoint, origin) {
+  const aud = new URL(endpoint).origin;
+  const enc = s => b64url(new TextEncoder().encode(JSON.stringify(s)));
+  const unsigned = enc({ typ: 'JWT', alg: 'ES256' }) + '.' + enc({ aud, exp: Math.floor(now() / 1000) + 12 * 3600, sub: origin });
+  const key = await crypto.subtle.importKey('jwk', JSON.parse(env.VAPID_PRIVATE_JWK), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']);
+  const sig = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, key, new TextEncoder().encode(unsigned));
+  return `vapid t=${unsigned}.${b64url(sig)}, k=${env.VAPID_PUBLIC}`;
+}
+async function pushTo(env, playerId, origin) {
+  if (!env.VAPID_PRIVATE_JWK || !env.VAPID_PUBLIC) return;
+  const { results } = await env.DB.prepare('SELECT endpoint FROM push_subs WHERE player_id=?').bind(playerId).all();
+  for (const r of results) {
+    try {
+      const res = await fetch(r.endpoint, { method: 'POST', headers: { TTL: '86400', Urgency: 'normal', Authorization: await vapidAuth(env, r.endpoint, origin) } });
+      if (res.status === 404 || res.status === 410) await env.DB.prepare('DELETE FROM push_subs WHERE endpoint=?').bind(r.endpoint).run();
+    } catch (e) { /* ממשיכים */ }
+  }
+}
+async function note(env, ns, playerId, kind, text, points, ctx, origin) {
+  await env.DB.prepare('INSERT INTO notes(id,ns,player_id,kind,text,points,created) VALUES(?,?,?,?,?,?,?)').bind(uid(), ns, playerId, kind, text, points, now()).run();
+  ctx.waitUntil(pushTo(env, playerId, origin));
+}
+
+/* ---------- Service Worker ---------- */
+const SW = `
+self.addEventListener('install',e=>self.skipWaiting());
+self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));
+self.addEventListener('push',e=>{e.waitUntil((async()=>{
+ const sub=await self.registration.pushManager.getSubscription();
+ let notes=[];
+ try{const r=await fetch('/api/push/notes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({endpoint:sub&&sub.endpoint})});notes=(await r.json()).notes||[];}catch(err){}
+ if(!notes.length)notes=[{text:'יש תוצאה חדשה באתגר שלך',id:'x'}];
+ for(const n of notes.slice(0,3))await self.registration.showNotification('צייר המוחות',{body:n.text,tag:n.id,icon:'/icon-192.png',badge:'/icon-192.png',lang:'he',dir:'rtl'});
+})());});
+self.addEventListener('notificationclick',e=>{e.notification.close();e.waitUntil((async()=>{
+ const all=await self.clients.matchAll({type:'window',includeUncontrolled:true});
+ for(const c of all){if('focus' in c)return c.focus();}
+ return self.clients.openWindow('/');
+})());});
+`;
+
+const ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#FF5A36"/><path d="M256 118c-34-30-96-22-112 22-42 2-66 46-48 82-28 24-24 76 10 94-2 40 40 70 78 56 18 28 54 30 72 10 18 20 54 18 72-10 38 14 80-16 78-56 34-18 38-70 10-94 18-36-6-80-48-82-16-44-78-52-112-22z" fill="#FFF6EA" stroke="#1F2440" stroke-width="16" stroke-linejoin="round"/><path d="M256 132v262M200 190c20 8 30 26 26 48M312 190c-20 8-30 26-26 48M170 290c22-10 46-6 60 12M342 290c-22-10-46-6-60 12" fill="none" stroke="#1F2440" stroke-width="14" stroke-linecap="round"/><circle cx="196" cy="246" r="14" fill="#FF5A36"/><circle cx="316" cy="246" r="14" fill="#FF5A36"/><circle cx="256" cy="330" r="14" fill="#FF5A36"/></svg>`;
+
+function manifest() {
+  return JSON.stringify({
+    name: 'צייר המוחות', short_name: 'צייר המוחות', lang: 'he', dir: 'rtl',
+    description: 'מלמדים מוח מלאכותי לזהות ציורים ומאתגרים את המוחות של כולם',
+    start_url: '/', scope: '/', display: 'standalone', orientation: 'portrait',
+    background_color: '#FBF6EC', theme_color: '#FBF6EC',
+    icons: [{ src: '/icon-192.png', sizes: '192x192', type: 'image/png' }, { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' }, { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml' }]
+  });
+}
+
+/* ---------- API ---------- */
+async function api(req, env, ctx, url) {
+  const ns = nsOf(url), p = url.pathname, m = req.method, DB = env.DB, origin = url.origin;
+
+  if (p === '/api/words') return json(WORDS);
+  if (p === '/api/vapid') return json({ key: env.VAPID_PUBLIC || null });
+
+  if (p === '/api/register' && m === 'POST') {
+    const name = cleanName((await body(req)).name);
+    if (name.length < 2) return err('שם קצר מדי');
+    if (await DB.prepare('SELECT 1 FROM players WHERE ns=? AND name=?').bind(ns, name).first()) return err('השם הזה תפוס – נסו שם אחר');
+    const code = String(1000 + Math.floor(Math.random() * 9000)), token = uid() + uid();
+    const id = uid();
+    await DB.prepare('INSERT INTO players(id,ns,name,code,token,score,created) VALUES(?,?,?,?,?,0,?)').bind(id, ns, name, code, token, now()).run();
+    return json({ id, name, code, token, score: 0 });
+  }
+  if (p === '/api/login' && m === 'POST') {
+    const b = await body(req), name = cleanName(b.name);
+    const r = await DB.prepare('SELECT id,name,code,token,score FROM players WHERE ns=? AND name=? AND code=?').bind(ns, name, String(b.code || '').trim()).first();
+    if (!r) return err('השם או הקוד לא נכונים', 401);
+    return json(r);
+  }
+  if (p === '/api/push/notes' && m === 'POST') {
+    const b = await body(req);
+    const s = b.endpoint && await DB.prepare('SELECT player_id FROM push_subs WHERE endpoint=?').bind(b.endpoint).first();
+    if (!s) return json({ notes: [] });
+    const { results } = await DB.prepare('SELECT id,text FROM notes WHERE player_id=? AND seen=0 ORDER BY created DESC LIMIT 3').bind(s.player_id).all();
+    return json({ notes: results });
+  }
+  if (p === '/api/leaders') {
+    const { results } = await DB.prepare(`SELECT p.id,p.name,p.score,COALESCE(b.ready_words,0) words FROM players p LEFT JOIN brains b ON b.player_id=p.id WHERE p.ns=? ORDER BY p.score DESC, p.created ASC LIMIT 30`).bind(ns).all();
+    return json({ leaders: results });
+  }
+  if (p === '/api/feed') {
+    const { results } = await DB.prepare(`SELECT a.word,a.lvl,a.ok,a.conf,a.points,a.k,a.guess,a.created,d.name drawer,o.name owner FROM attempts a JOIN players d ON d.id=a.player_id JOIN players o ON o.id=a.owner_id WHERE a.ns=? ORDER BY a.created DESC LIMIT 40`).bind(ns).all();
+    const stats = await DB.prepare(`SELECT lvl, COUNT(*) n, SUM(ok) ok, AVG(CASE WHEN ok=1 THEN conf END) conf FROM attempts WHERE ns=? GROUP BY lvl`).bind(ns).all();
+    const open = await DB.prepare(`SELECT COUNT(*) n FROM challenges WHERE ns=? AND status='open'`).bind(ns).first();
+    return json({ feed: results, stats: stats.results, open: open.n });
+  }
+  if (p === '/api/reset' && m === 'POST') {
+    if (!ns.endsWith('test')) return err('אפשר לאפס רק את סביבת הבדיקה', 403);
+    await DB.batch([
+      DB.prepare(`DELETE FROM brains WHERE ns=?`).bind(ns), DB.prepare(`DELETE FROM challenges WHERE ns=?`).bind(ns),
+      DB.prepare(`DELETE FROM attempts WHERE ns=?`).bind(ns), DB.prepare(`DELETE FROM notes WHERE ns=?`).bind(ns),
+      DB.prepare(`DELETE FROM push_subs WHERE ns=?`).bind(ns), DB.prepare(`DELETE FROM players WHERE ns=?`).bind(ns)]);
+    return json({ ok: true });
+  }
+
+  /* ---- מכאן נדרשת התחברות ---- */
+  const me = await auth(req, env, ns);
+  if (!me) return err('צריך להתחבר מחדש', 401);
+
+  if (p === '/api/me') {
+    const rank = await DB.prepare('SELECT COUNT(*)+1 r FROM players WHERE ns=? AND score>?').bind(ns, me.score).first();
+    const { results: notes } = await DB.prepare('SELECT id,kind,text,points,created FROM notes WHERE player_id=? AND seen=0 ORDER BY created ASC LIMIT 10').bind(me.id).all();
+    return json({ me: { id: me.id, name: me.name, code: me.code, score: me.score, rank: rank.r }, notes });
+  }
+  if (p === '/api/notes') {
+    const { results } = await DB.prepare('SELECT id,kind,text,points,seen,created FROM notes WHERE player_id=? ORDER BY created DESC LIMIT 30').bind(me.id).all();
+    return json({ notes: results });
+  }
+  if (p === '/api/notes/seen' && m === 'POST') {
+    await DB.prepare('UPDATE notes SET seen=1 WHERE player_id=?').bind(me.id).run();
+    return json({ ok: true });
+  }
+  if (p === '/api/push/sub' && m === 'POST') {
+    const b = await body(req);
+    if (!b.endpoint) return err('חסר מנוי');
+    await DB.prepare('INSERT OR REPLACE INTO push_subs(endpoint,ns,player_id,created) VALUES(?,?,?,?)').bind(b.endpoint, ns, me.id, now()).run();
+    return json({ ok: true });
+  }
+
+  if (p === '/api/brain' && m === 'GET') {
+    const r = await DB.prepare('SELECT cats,net,ex,rounds,updated FROM brains WHERE player_id=?').bind(me.id).first();
+    return json({ brain: r || null });
+  }
+  if (p === '/api/brain' && m === 'PUT') {
+    const b = await body(req);
+    if (!Array.isArray(b.cats)) return err('מוח לא תקין');
+    const cats = b.cats.filter(c => LVL.has(c.w)).map(c => ({ w: c.w, n: Math.min(MAX_EX, Math.max(0, c.n | 0)) }));
+    if (cats.length !== b.cats.length) return err('יש מילה שלא מהמאגר');
+    if (b.net) { const o = JSON.parse(b.net); if (!o.W2 || o.W2.length !== cats.length) return err('הרשת לא תואמת למילים'); }
+    const ready = cats.filter(c => c.n >= MIN_EX).length;
+    await DB.prepare(`INSERT INTO brains(player_id,ns,cats,ready_words,net,ex,rounds,updated) VALUES(?,?,?,?,?,?,?,?)
+      ON CONFLICT(player_id) DO UPDATE SET cats=excluded.cats,ready_words=excluded.ready_words,net=excluded.net,ex=excluded.ex,rounds=excluded.rounds,updated=excluded.updated`)
+      .bind(me.id, ns, JSON.stringify(cats), ready, b.net || null, b.ex || null, b.rounds | 0, now()).run();
+    // אתגר פתוח על מילה שנמחקה או נמחקה מהמוח – נסגר
+    const { results: open } = await DB.prepare(`SELECT id,word FROM challenges WHERE owner_id=? AND status='open'`).bind(me.id).all();
+    const okW = new Set(cats.filter(c => c.n >= MIN_EX).map(c => c.w));
+    for (const c of open) if (!okW.has(c.word) || ready < MIN_WORDS)
+      await DB.prepare(`UPDATE challenges SET status='closed',closed_at=? WHERE id=?`).bind(now(), c.id).run();
+    return json({ ok: true, ready });
+  }
+
+  if (p === '/api/square') {
+    const { results } = await DB.prepare(`SELECT c.id,c.word,c.lvl,c.tries,c.created,c.curse,o.name owner,COALESCE(b.ready_words,0) k,b.cats,b.ex
+      FROM challenges c JOIN players o ON o.id=c.owner_id LEFT JOIN brains b ON b.player_id=c.owner_id
+      WHERE c.ns=? AND c.status='open' AND c.owner_id<>? AND NOT EXISTS (SELECT 1 FROM attempts a WHERE a.challenge_id=c.id AND a.player_id=?)
+      ORDER BY c.created DESC LIMIT 60`).bind(ns, me.id, me.id).all();
+    const exCache = new Map();
+    const out = await Promise.all(results.map(async c => {
+      const cats = c.cats ? JSON.parse(c.cats) : [], k = cats.findIndex(x => x.w === c.word), n = (cats[k] || { n: 1 }).n;
+      const { cats: _c, ex, ...rest } = c;
+      const min = maxScore(c.lvl, c.k, n, c.curse);
+      let Lm = DEF_L;
+      if (MODE === 'ink' && ex) { if (!exCache.has(ex)) exCache.set(ex, await unzipEx(ex)); Lm = medL(exCache.get(ex).filter(a => a[0] === k)); }
+      return { ...rest, n, mult: riskMult(n), cmult: curseMult(c.curse), min, max: MODE === 'ink' ? min * INK_MAX : min, Lmed: Lm, inkMax: INK_MAX };
+    }));
+    return json({ challenges: out });
+  }
+  if (p === '/api/mine') {
+    const { results } = await DB.prepare(`SELECT c.id,c.word,c.lvl,c.status,c.tries,c.created,c.curse,s.name solver FROM challenges c LEFT JOIN players s ON s.id=c.solved_by
+      WHERE c.owner_id=? AND c.status<>'closed' ORDER BY c.status='open' DESC, c.created DESC LIMIT 60`).bind(me.id).all();
+    return json({ challenges: results });
+  }
+  if (p === '/api/challenge' && m === 'POST') {
+    const word = String((await body(req)).word || '');
+    const lvl = LVL.get(word); if (!lvl) return err('המילה לא במאגר');
+    const br = await DB.prepare('SELECT cats,ready_words,net FROM brains WHERE player_id=?').bind(me.id).first();
+    if (!br || !br.net) return err('קודם צריך לאמן את המוח');
+    const rw = JSON.parse(br.cats).filter(c => c.n >= MIN_EX).length;
+    if (rw !== br.ready_words) { br.ready_words = rw; await DB.prepare('UPDATE brains SET ready_words=? WHERE player_id=?').bind(rw, me.id).run(); }
+    if (br.ready_words < MIN_WORDS) return err(`צריך לפחות ${MIN_WORDS} מילים עם ${MIN_EX} ציורים כל אחת`);
+    const c = JSON.parse(br.cats).find(c => c.w === word);
+    if (!c || c.n < MIN_EX) return err(`למילה צריך לפחות ${MIN_EX} ציורים`);
+    if (await DB.prepare(`SELECT 1 FROM challenges WHERE owner_id=? AND word=? AND status='open'`).bind(me.id, word).first()) return err('המילה הזאת כבר באתגר');
+    if (await DB.prepare(`SELECT 1 FROM challenges WHERE owner_id=? AND word=? AND status='solved'`).bind(me.id, word).first()) return err('המילה הזאת כבר נפתרה – אי אפשר לפרסם אותה שוב');
+    const id = uid();
+    const curse = MODE === 'ink' ? null : CURSES[Math.floor(Math.random() * CURSES.length)];
+    await DB.prepare('INSERT INTO challenges(id,ns,owner_id,word,lvl,status,tries,created,curse) VALUES(?,?,?,?,?,\'open\',0,?,?)').bind(id, ns, me.id, word, lvl, now(), curse).run();
+    return json({ ok: true, id, curse });
+  }
+  const mDel = p.match(/^\/api\/challenge\/([\w-]+)$/);
+  if (mDel && m === 'DELETE') {
+    await DB.prepare(`UPDATE challenges SET status='closed',closed_at=? WHERE id=? AND owner_id=? AND status='open'`).bind(now(), mDel[1], me.id).run();
+    return json({ ok: true });
+  }
+
+  if (p === '/api/attempt' && m === 'POST') {
+    const b = await body(req);
+    const c = await DB.prepare(`SELECT c.*,o.name owner FROM challenges c JOIN players o ON o.id=c.owner_id WHERE c.id=? AND c.ns=?`).bind(b.id, ns).first();
+    if (!c) return err('האתגר לא נמצא', 404);
+    if (c.owner_id === me.id) return err('אי אפשר לאתגר את המוח של עצמך');
+    if (c.status !== 'open') return err(c.status === 'solved' ? 'מישהו כבר פתר את האתגר הזה' : 'האתגר נסגר');
+    if (await DB.prepare('SELECT 1 FROM attempts WHERE challenge_id=? AND player_id=?').bind(c.id, me.id).first()) return err('כבר ניסית את האתגר הזה');
+    const br = await DB.prepare('SELECT cats,ready_words,net,ex FROM brains WHERE player_id=?').bind(c.owner_id).first();
+    const cats = br ? JSON.parse(br.cats) : [];
+    const k = cats.findIndex(x => x.w === c.word);
+    if (!br || !br.net || k < 0) return err('המוח של בעל האתגר השתנה – האתגר נסגר');
+    const ds = typeof b.d === 'string' && /^[0-9a-f]{784}$/.test(b.d) ? b.d : null;
+    let ok = false, conf = 0, guess = '', sim = 0, prob = 0;
+    const exAll = (await unzipEx(br.ex)).filter(a => a[0] === k), exK = exAll.map(a => strToD(a[1]));
+    const Lmed = medL(exAll);
+    const L = Math.max(0, +b.L || 0), inkR = L ? L / Lmed : 1, im = MODE === 'ink' ? inkMult(inkR) : 1;
+    const nEx = Math.max(1, exK.length || cats[k].n);
+    if (ds) {
+      const d = strToD(ds), p2 = forward(decodeNet(br.net), d);
+      let g = 0; for (let i = 1; i < p2.length; i++) if (p2[i] > p2[g]) g = i;
+      sim = exK.length ? simTo(d, exK) : 1; prob = p2[k];
+      ok = g === k && sim >= SIM_OK; conf = prob * simFactor(sim); guess = g === k && !ok ? '' : cats[g].w;
+    }
+    const K = cats.filter(x => x.n >= MIN_EX).length, pts = scoreFor(c.lvl, K, conf, ok, nEx, c.curse, im);
+    // נעילה: רק הניסיון הראשון שמצליח פותר
+    if (ok) {
+      const upd = await DB.prepare(`UPDATE challenges SET status='solved',solved_by=?,closed_at=?,tries=tries+1 WHERE id=? AND status='open'`).bind(me.id, now(), c.id).run();
+      if (!upd.meta.changes) return err('מישהו פתר את האתגר שנייה לפניך');
+    } else await DB.prepare('UPDATE challenges SET tries=tries+1 WHERE id=?').bind(c.id).run();
+    await DB.batch([
+      DB.prepare('INSERT INTO attempts(id,ns,challenge_id,player_id,owner_id,word,lvl,ok,conf,guess,points,k,d,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+        .bind(uid(), ns, c.id, me.id, c.owner_id, c.word, c.lvl, ok ? 1 : 0, conf, guess, pts, K, ds, now()),
+      DB.prepare('UPDATE players SET score=score+? WHERE id IN (?,?)').bind(pts, me.id, c.owner_id)]);
+    const pc = Math.round(conf * 100);
+    const gain = ok ? `קיבלת ${pts} נקודות` : `איבדת ${-pts} נקודות`;
+    await note(env, ns, c.owner_id, ok ? 'win' : 'lose', ok
+      ? `${me.name} צייר "${c.word}" – המוח שלך זיהה ב־${pc}%. ${gain}`
+      : guess ? `${me.name} צייר "${c.word}" – המוח שלך חשב שזה "${guess}". ${gain}` : `${me.name} צייר "${c.word}" – לא דומה מספיק לציורים שלך. ${gain}`, pts, ctx, origin);
+    await note(env, ns, me.id, ok ? 'dwin' : 'dlose', ok
+      ? `המוח של ${c.owner} זיהה את "${c.word}" שלך ב־${pc}%. ${gain}`
+      : `המוח של ${c.owner} לא זיהה את "${c.word}" שלך. ${gain}`, pts, ctx, origin);
+    return json({ ok, conf, guess, sim, prob, n: nEx, mult: riskMult(nEx), cmult: curseMult(c.curse), imult: im, inkR, mode: MODE, points: pts, k: K, lvl: c.lvl, word: c.word, owner: c.owner, empty: !ds });
+  }
+  return err('לא נמצא', 404);
+}
+
+/* ---------- ניתוב ---------- */
+export default {
+  async fetch(req, env, ctx) {
+    const url = new URL(req.url), p = url.pathname;
+    try {
+      if (p.startsWith('/api/')) return await api(req, env, ctx, url);
+      if (p === '/' || p === '/index.html')
+        return new Response(APP.replace('/*__WORDS__*/null', JSON.stringify(WORDS)).replace(/__ORIGIN__/g, url.origin), { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' } });
+      if (p === '/sim') return new Response(SIM, { headers: { 'content-type': 'text/html; charset=utf-8', 'x-robots-tag': 'noindex' } });
+      if (p === '/sw.js') return new Response(SW, { headers: { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache' } });
+      if (p === '/manifest.webmanifest') return new Response(manifest(), { headers: { 'content-type': 'application/manifest+json' } });
+      if (p === '/icon.svg') return new Response(ICON_SVG, { headers: { 'content-type': 'image/svg+xml', 'cache-control': 'public, max-age=86400' } });
+      if (p === '/icon-192.png' || p === '/icon-512.png' || p === '/apple-touch-icon.png') {
+        const b = ICONS[p];
+        if (b) { const s = atob(b), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return new Response(u, { headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' } }); }
+        return new Response(ICON_SVG, { headers: { 'content-type': 'image/svg+xml' } });
+      }
+      if (p === '/robots.txt') return new Response(`User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /sim\nSitemap: ${url.origin}/sitemap.xml\n`, { headers: { 'content-type': 'text/plain' } });
+      if (p === '/sitemap.xml') return new Response(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${url.origin}/</loc><changefreq>weekly</changefreq></url></urlset>`, { headers: { 'content-type': 'application/xml' } });
+      return new Response('לא נמצא', { status: 404 });
+    } catch (e) {
+      return err('שגיאת שרת: ' + (e && e.message || e), 500);
+    }
+  }
+};
