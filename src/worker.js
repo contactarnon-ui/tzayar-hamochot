@@ -26,7 +26,9 @@ const CURSES = ['line', 'three', 'mirror', 'white', 'time', 'straight', 'flip', 
 const SIM_OK = 0.7, SIM_LO = 0.55, SIM_HI = 0.9;
 function blur2(d) { let o = Float32Array.from(d); for (let pass = 0; pass < 2; pass++) { const n = new Float32Array(IN); for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { let s = 0, c = 0; for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) { const yy = y + a, xx = x + b; if (yy < 0 || yy >= N || xx < 0 || xx >= N) continue; s += o[yy * N + xx]; c++; } n[y * N + x] = s / c; } o = n; } return o; }
 function cosSim(a, b) { let s = 0, x = 0, y = 0; for (let i = 0; i < a.length; i++) { s += a[i] * b[i]; x += a[i] * a[i]; y += b[i] * b[i]; } return s / Math.sqrt(x * y + 1e-9); }
-function simTo(d, exs) { const bd = blur2(d); let m = 0; for (const e of exs) m = Math.max(m, cosSim(bd, blur2(e))); return m; }
+// היפוכים וסיבובים: 4 סיבובים × עם/בלי מראה
+function tf8(d, k) { if (!k) return d; const o = new d.constructor(d.length); for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { let a = (k & 4) ? N - 1 - x : x, b = y; for (let r = 0; r < (k & 3); r++) { const t = a; a = N - 1 - b; b = t; } o[b * N + a] = d[y * N + x]; } return o; }
+function simTo(d, exs) { const bd = blur2(d), eb = exs.map(blur2); let m = 0; for (let k = 0; k < 8; k++) { const t = tf8(bd, k); for (const e of eb) m = Math.max(m, cosSim(t, e)); } return m; }
 const simFactor = s => Math.min(1, Math.max(0, (s - SIM_LO) / (SIM_HI - SIM_LO)));
 async function unzipEx(b) {
   if (!b) return [];

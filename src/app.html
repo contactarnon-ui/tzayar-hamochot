@@ -500,6 +500,9 @@ const riskMult=n=>Math.round((3-(Math.min(MAX_EX,Math.max(1,n))-1)*2/9)*10)/10;
 const SIM_OK=0.7,SIM_LO=0.55,SIM_HI=0.9;
 function blur2(d){let o=Float32Array.from(d);for(let pass=0;pass<2;pass++){const n=new Float32Array(IN);for(let y=0;y<N;y++)for(let x=0;x<N;x++){let s=0,c=0;for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const yy=y+a,xx=x+b;if(yy<0||yy>=N||xx<0||xx>=N)continue;s+=o[yy*N+xx];c++;}n[y*N+x]=s/c;}o=n;}return o;}
 function cosSim(a,b){let s=0,x=0,y=0;for(let i=0;i<a.length;i++){s+=a[i]*b[i];x+=a[i]*a[i];y+=b[i]*b[i];}return s/Math.sqrt(x*y+1e-9);}
+
+function tf8(d,k){if(!k)return d;const o=new d.constructor(d.length);for(let y=0;y<N;y++)for(let x=0;x<N;x++){let a=(k&4)?N-1-x:x,b=y;for(let r=0;r<(k&3);r++){const t=a;a=N-1-b;b=t;}o[b*N+a]=d[y*N+x];}return o;}
+function simMax(bd,exB){let m=0;for(let k=0;k<8;k++){const t=tf8(bd,k);for(const e of exB)m=Math.max(m,cosSim(t,e));}return m;}
 const simFactor=s=>Math.min(1,Math.max(0,(s-SIM_LO)/(SIM_HI-SIM_LO)));
 const CURSE={line:{t:'קו אחד',d:'בלי להרים את האצבע'},three:{t:'3 קווים',d:'רק שלושה קווים'},mirror:{t:'מראה',d:'הקו יוצא הפוך מהאצבע'},white:{t:'מכחול לבן',d:'הקו לא נראה בזמן הציור'},time:{t:'5 שניות',d:'מהנגיעה הראשונה'}};
 CURSE.half=CURSE.white;
@@ -525,7 +528,7 @@ const byCat=()=>{const b=S.cats.map(()=>[]);S.ex.forEach(e=>b[e.c]&&b[e.c].push(
 const counts=()=>byCat().map(a=>a.length);
 const readyWords=()=>counts().filter(n=>n>=MIN_EX).length;
 const trainable=()=>counts().filter(n=>n>0).length>=2;
-function aug(e){return toX(e.d,((Math.random()*5)|0)-2,((Math.random()*5)|0)-2);}
+function aug(e){const k=(Math.random()*8)|0;e.t=e.t||[];const d=e.t[k]||(e.t[k]=tf8(e.d,k));return toX(d,((Math.random()*5)|0)-2,((Math.random()*5)|0)-2);}
 function evalAcc(){if(!S.ex.length)return 0;let ok=0;for(const e of S.ex)if(argmax(forward(toX(e.d)).p)===e.c)ok++;return ok/S.ex.length;}
 function catIndex(w){return S.cats.findIndex(c=>c.w===w);}
 function ensureCat(w){let k=catIndex(w);if(k<0){S.cats.push({w});addOut();k=S.cats.length-1;}return k;}
@@ -842,7 +845,7 @@ async function delExample(e){
  if(!byCat()[k].length)removeCat(k);
  if(catIndex(cur.word)>=0)renderWord();else renderSlots();dirty();kickTrain();paintTrain();
 }
-function removeCat(k){S.cats.splice(k,1);net.W2.splice(k,1);net.b2.splice(k,1);S.ex=S.ex.filter(e=>e.c!==k).map(e=>({c:e.c>k?e.c-1:e.c,d:e.d}));}
+function removeCat(k){S.cats.splice(k,1);net.W2.splice(k,1);net.b2.splice(k,1);S.ex=S.ex.filter(e=>e.c!==k).map(e=>({...e,c:e.c>k?e.c-1:e.c}));}
 $('#wDel').onclick=async()=>{const k=catIndex(cur.word);if(k<0)return;if(!await ask(`למחוק את "${cur.word}"?`,'כל הציורים של המילה יימחקו מהמוח.','מחיקה'))return;removeCat(k);dirty();kickTrain();go(cur.stack.pop()||'vRoom',false);};
 $('#wTest').onclick=()=>go('vTest');
 $('#wPub').onclick=async()=>{
@@ -865,7 +868,7 @@ let lastTestD=null;
 function predict(){
  const d=grabPad();lastTestD=d;const g=$('#tGuess'),bars=$('#tBars');
  if(!d||!trainable()){g.innerHTML='';bars.innerHTML='';return;}
- const p=forward(toX(d)).p,k=argmax(p),bd=blur2(d),sim=Math.max(0,...byCat()[k].map(e=>cosSim(bd,blur2(e.d)))),pass=sim>=SIM_OK,conf=p[k]*simFactor(sim);
+ const p=forward(toX(d)).p,k=argmax(p),bd=blur2(d),sim=simMax(bd,byCat()[k].map(e=>e.b||(e.b=blur2(e.d)))),pass=sim>=SIM_OK,conf=p[k]*simFactor(sim);
  g.innerHTML=`<small>${pass?'זה':'אולי…'}</small><span></span><small class="num">${Math.round(conf*100)}%</small><em class="simTag ${pass?'ok':'no'}">דמיון ${Math.round(sim*100)}% · ${pass?'יזוהה באתגר':'לא יזוהה באתגר'}</em>`;g.querySelector('span').textContent=S.cats[k].w;g.className='guess lv'+LVL.get(S.cats[k].w);g.querySelector('span').style.color='var(--lc)';
  bars.innerHTML='';
  [...p].map((v,i)=>[v,i]).sort((a,b)=>b[0]-a[0]).slice(0,4).forEach(([v,i])=>{
@@ -1033,7 +1036,7 @@ async function enter(r){AUTH={id:r.id,token:r.token,name:r.name};ls.set('auth',A
 /* ---------- התחלה ---------- */
 async function boot(){
  await loadBrain();cur.stack=[];go('vRoom',false);refreshMe();loadMine();
- if(trainable()&&S.rounds===0)kickTrain();
+ if(trainable()&&(S.rounds===0||!ls.get('aug8',false))){ls.set('aug8',true);kickTrain();}
 }
 
 if('serviceWorker' in navigator&&!SIM&&!DEMO)navigator.serviceWorker.register('/sw.js').catch(()=>{});
