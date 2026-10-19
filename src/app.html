@@ -917,9 +917,15 @@ $('#wSave').onclick=()=>{
  const n=byCat()[k].length;if(n===1&&readyWords()===MIN_WORDS&&!SOLO)setTimeout(()=>toast('5 מילים במוח! עכשיו אפשר לפרסם אתגרים'),1800);
 };
 /* הגדלת ציור שמור */
-function bigDraw(cv,d){const x=cv.getContext('2d'),off=document.createElement('canvas');off.width=off.height=28;const ox=off.getContext('2d'),im=ox.createImageData(28,28);
- for(let q=0;q<IN;q++){const t=d[q]/15;im.data[q*4]=Math.round(255-t*(255-0x1F));im.data[q*4+1]=Math.round(255-t*(255-0x24));im.data[q*4+2]=Math.round(255-t*(255-0x40));im.data[q*4+3]=255;}
- ox.putImageData(im,0,0);x.fillStyle='#fff';x.fillRect(0,0,280,280);x.imageSmoothingEnabled=true;x.imageSmoothingQuality='high';x.filter='blur(1.2px) contrast(1.4)';x.drawImage(off,0,0,280,280);x.filter='none';}
+function bigDraw(cv,d){
+ // הגדלה חדה: אינטרפולציה חלקה + סף רך, כדי שהקו ייראה כמו קו ולא כמו כתם מטושטש
+ const x=cv.getContext('2d'),W=cv.width,im=x.createImageData(W,W),sc=28/W;
+ for(let Y=0;Y<W;Y++){const fy=Math.max(0,Math.min(27,(Y+.5)*sc-.5)),y0=Math.floor(fy),y1=Math.min(27,y0+1),ty=fy-y0;
+  for(let X=0;X<W;X++){const fx=Math.max(0,Math.min(27,(X+.5)*sc-.5)),x0=Math.floor(fx),x1=Math.min(27,x0+1),tx=fx-x0;
+   const v=((d[y0*28+x0]*(1-tx)+d[y0*28+x1]*tx)*(1-ty)+(d[y1*28+x0]*(1-tx)+d[y1*28+x1]*tx)*ty)/15;
+   let a=(v-.3)/.22;a=a<0?0:a>1?1:a*a*(3-2*a);const o=(Y*W+X)*4;
+   im.data[o]=Math.round(255-a*(255-0x1F));im.data[o+1]=Math.round(255-a*(255-0x24));im.data[o+2]=Math.round(255-a*(255-0x40));im.data[o+3]=255;}}
+ x.putImageData(im,0,0);}
 let exView=null;
 function openEx(list,i){exView={list,i};paintEx();openSheet('#shEx');}
 function paintEx(){const {list,i}=exView,e=list[i];if(!e){closeSheets();return;}
@@ -1115,11 +1121,10 @@ function runRec(){
    if(i<ev.length)recRAF=requestAnimationFrame(step);else setTimeout(done,350);};
   recRAF=requestAnimationFrame(step);
  }else if(a.d){
-  // אין הקלטה (למשל מחשב) – הציור מתגלה בהדרגה, מוחלק
+  // אין הקלטה (למשל מחשב) – הציור מתגלה בהדרגה
   const v=[...a.d].map(h=>parseInt(h,16)),px=[];v.forEach((q,j)=>{if(q)px.push(j);});px.sort((p,q)=>(p%28+(p/28|0))-(q%28+(q/28|0)));
-  const off=document.createElement('canvas');off.width=off.height=28;const ox=off.getContext('2d'),im=ox.createImageData(28,28);for(let q=0;q<IN;q++){im.data[q*4]=im.data[q*4+1]=im.data[q*4+2]=255;im.data[q*4+3]=255;}
-  let j=0;const step=()=>{for(let n=0;n<5&&j<px.length;n++,j++){const q=px[j],t=v[q]/15;im.data[q*4]=Math.round(255-t*(255-0x1F));im.data[q*4+1]=Math.round(255-t*(255-0x24));im.data[q*4+2]=Math.round(255-t*(255-0x40));}
-   ox.putImageData(im,0,0);x.fillStyle='#fff';x.fillRect(0,0,280,280);x.imageSmoothingEnabled=true;x.imageSmoothingQuality='high';x.filter='blur(2px) contrast(1.6)';x.drawImage(off,0,0,280,280);x.filter='none';
+  const part=new Uint8Array(IN);let j=0;
+  const step=()=>{for(let n=0;n<8&&j<px.length;n++,j++)part[px[j]]=v[px[j]];bigDraw(cv,part);
    if(j<px.length)recRAF=requestAnimationFrame(step);else setTimeout(done,350);};recRAF=requestAnimationFrame(step);
  }else done();
 }

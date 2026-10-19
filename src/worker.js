@@ -414,7 +414,7 @@ async function runAttempt(env, ns, me, c, ds, Lin, ctx, origin, rec = null) {
   if (!isBot(c.owner_id)) nid = await note(env, ns, c.owner_id, ok ? 'win' : 'lose', ok
     ? `${who} צייר "${c.word}" – המוח שלך זיהה ב־${pc}%. ${gain(ownerPts)}`
     : guess ? `${who} צייר "${c.word}" – המוח שלך חשב שזה "${guess}". ${gain(ownerPts)}` : `${who} צייר "${c.word}" – לא דומה מספיק לציורים שלך. ${gain(ownerPts)}`, ownerPts, ctx, origin);
-  if (!isBot(c.owner_id) && (rec || ds)) { try { await ensureRecs(DB); await DB.prepare('INSERT INTO recs(attempt_id,ns,note_id,rec,created) VALUES(?,?,?,?,?)').bind(aid, ns, nid, rec, now()).run(); } catch (e) { } }
+  if (!isBot(me.id) || !isBot(c.owner_id)) if (rec || ds) { try { await ensureRecs(DB); await DB.prepare('INSERT INTO recs(attempt_id,ns,note_id,rec,created) VALUES(?,?,?,?,?)').bind(aid, ns, nid, rec, now()).run(); } catch (e) { } }
   if (!isBot(me.id)) await note(env, ns, me.id, ok ? 'dwin' : 'dlose', ok
     ? `המוח של ${c.owner} זיהה את "${c.word}" שלך ב־${pc}%. ${gain(pts)}`
     : `המוח של ${c.owner} לא זיהה את "${c.word}" שלך. ${gain(pts)}`, pts, ctx, origin);
