@@ -950,16 +950,18 @@ function renderTest(){
  onStroke=(end)=>{const t=performance.now();if(!end&&t-predT<140)return;predT=t;predict();};
  if(!trainable()){$('#tGuess').innerHTML='<small>צריך לפחות 2 מילים במוח</small>';}
 }
+/*__KNN__*/
 let lastTestD=null;
 function predict(){
  const d=grabPad();lastTestD=d;const g=$('#tGuess'),bars=$('#tBars');
  if(!d||!trainable()){g.innerHTML='';bars.innerHTML='';return;}
- const p=forward(toX(d)).p,k=argmax(p),bd=prep(d),sim=simMax(bd,byCat()[k].map(e=>e.b2||(e.b2=prep(e.d)))),pass=sim>=SIM_OK,conf=p[k]*simFactor(sim);
+ const p0=forward(toX(d)).p,topP=[...p0].map((v,i)=>[v,i]).sort((a,b)=>b[0]-a[0]).slice(0,6).map(x=>x[1]);
+ // זיהוי משולב: הרשת + הציור הכי דומה ששמרת
+ const sv=wordSims(d,S.ex,S.cats.length,topP),p=mixP(p0,sv),k=argmax(p),sim=sv[k],pass=sim>=SIM_OK,conf=p[k]*simFactor(sim);
  g.innerHTML=`<small>${pass?'זה':'אולי…'}</small><span></span><small class="num">${Math.round(conf*100)}%</small><em class="simTag ${pass?'ok':'no'}">דמיון ${Math.round(sim*100)}% · ${pass?'יזוהה באתגר':'לא יזוהה באתגר'}</em>`;g.querySelector('span').textContent=S.cats[k].w;g.className='guess lv'+LVL.get(S.cats[k].w);g.querySelector('span').style.color='var(--lc)';
  bars.innerHTML='';
  // העמודות: 3 המילים שהמוח הכי חושב שמתאימות; האחוז = הציון שקובע זיהוי באתגר (ביטחון × דמיון)
- const bc=byCat();
- [...p].map((v,i)=>[v,i]).sort((a,b)=>b[0]-a[0]).slice(0,3).map(([v,i])=>[i===k?conf:v*simFactor(simMax(bd,(bc[i]||[]).map(e=>e.b2||(e.b2=prep(e.d))))),i]).forEach(([v,i])=>{
+ [...p].map((v,i)=>[v,i]).sort((a,b)=>b[0]-a[0]).slice(0,3).map(([v,i])=>[v*simFactor(sv[i]),i]).forEach(([v,i])=>{
   const w=S.cats[i].w,b=document.createElement('button');b.className='bar lv'+LVL.get(w);
   b.innerHTML=`<span class="nm"></span><span class="tr"><span class="fl" style="display:block;width:${(v*100).toFixed(1)}%"></span></span><span class="pc num">${Math.round(v*100)}%</span>`;
   b.querySelector('.nm').textContent=w;b.onclick=()=>teachFromTest(i);bars.appendChild(b);});

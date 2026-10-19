@@ -4,6 +4,7 @@ window.__DEMO=true;
 const WORDS=/*__WORDS__*/null;
 const N=28,IN=N*N,MIN_EX=1,MAX_EX=10,MIN_WORDS=5,BASE={1:10,2:20,3:30,4:10};
 const LVL=new Map();for(const k of ['1','2','3'])for(const w of WORDS[k])LVL.set(w,+k);
+/*__KNN__*/
 const WF_S=/*__FILTER__*/null;
 function wordProblemS(w, F = WF_S) {
   w = String(w || '').trim();
@@ -96,8 +97,10 @@ async function handle(method,url,headers,body){
   const br=db.brains[c.owner_id],cats=br?JSON.parse(br.cats):[],k=cats.findIndex(x=>x.w===c.word);
   if(!br||!br.net||k<0)return E('המוח של בעל האתגר השתנה – האתגר נסגר');
   const ds=typeof body.d==='string'&&/^[0-9a-f]{784}$/.test(body.d)?body.d:null;let ok=false,conf=0,guess='',sim=0;
-  const exK=(await unzipEx(br.ex)).filter(a=>a[0]===k).map(a=>hexD(a[1])),nEx=Math.max(1,exK.length||cats[k].n);
-  if(ds){const pr=forward(br.net,ds);let g=0;for(let i=1;i<pr.length;i++)if(pr[i]>pr[g])g=i;const bd=prep(hexD(ds)),eb=exK.map(prep);sim=1;if(eb.length){sim=0;for(const q of SIM_TF){const t=tf8(bd,q);for(const e of eb)sim=Math.max(sim,cosSim(t,e));}}ok=g===k&&sim>=SIM_OK;conf=pr[k]*Math.min(1,Math.max(0,(sim-SIM_LO)/(SIM_HI-SIM_LO)));guess=g===k&&!ok?'':cats[g].w;}
+  const exEvery=await unzipEx(br.ex),exK=exEvery.filter(a=>a[0]===k).map(a=>hexD(a[1])),nEx=Math.max(1,exK.length||cats[k].n);
+  if(ds){const pr0=forward(br.net,ds),dd=hexD(ds);let pr=pr0,sv=null;
+   if(exK.length){const topP=[...pr0].map((v,i)=>[v,i]).sort((a,b)=>b[0]-a[0]).slice(0,6).map(x=>x[1]);sv=wordSims(dd,exEvery.map(a=>({c:a[0],d:hexD(a[1])})),pr0.length,[k,...topP]);pr=mixP(pr0,sv);}
+   let g=0;for(let i=1;i<pr.length;i++)if(pr[i]>pr[g])g=i;sim=sv?sv[k]:1;ok=g===k&&sim>=SIM_OK;conf=pr[k]*Math.min(1,Math.max(0,(sim-SIM_LO)/(SIM_HI-SIM_LO)));guess=g===k&&!ok?'':cats[g].w;}
   const K=cats.filter(x=>x.n>=MIN_EX).length,pts=scoreFor(c.lvl,K,conf,ok,nEx,c.curse),owner=P(c.owner_id);
   c.tries++;if(ok)c.solved_by=me.id;
   db.attempts.push({id:uid(),challenge_id:c.id,player_id:me.id,owner_id:c.owner_id,word:c.word,lvl:c.lvl,ok:ok?1:0,conf,guess,points:pts,k:K,created:Date.now()});

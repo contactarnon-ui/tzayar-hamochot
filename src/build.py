@@ -1,6 +1,8 @@
 import json,re
 T='/home/claude/tzayar/'
-rd=lambda f:open(T+f,encoding='utf8').read()
+_rd=lambda f:open(T+f,encoding='utf8').read()
+KNN=_rd('knn.js')
+rd=lambda f:_rd(f).replace('/*__KNN__*/',KNN)
 w=rd('worker.js')
 for imp in ["import { WORDS, WFILTER, wordProblem } from './words.js';\n","import APP from './app.html';\n","import SIM from './sim.html';\n","import { ICONS } from './icons.js';\n"]:
     assert imp in w; w=w.replace(imp,'')

@@ -12,6 +12,7 @@ for (const k of ['1', '2', '3']) for (const w of WORDS[k]) LVL.set(w, +k);
 // מילה חופשית (לא מהמאגר, עברה סינון) = רמה 4, ניקוד כמו פשוטה
 const lvlOf = w => LVL.get(w) || (wordProblem(w) ? 0 : 4);
 
+/*__KNN__*/
 /* ---------- ניקוד ---------- */
 export function sizeBonus(k) { return Math.min(2, Math.max(0, (k - MIN_WORDS) * 0.05)); }
 // מכפיל סיכון: ציור אחד = ×3, עשרה ציורים = ×1
@@ -376,14 +377,20 @@ async function runAttempt(env, ns, me, c, ds, Lin, ctx, origin, rec = null) {
   const k = cats.findIndex(x => x.w === c.word);
   if (!br || !br.net || k < 0) return { error: 'המוח של בעל האתגר השתנה – האתגר נסגר' };
   let ok = false, conf = 0, guess = '', sim = 0, prob = 0;
-  const exAll = (await unzipEx(br.ex)).filter(a => a[0] === k), exK = exAll.map(a => strToD(a[1]));
+  const exEvery = await unzipEx(br.ex), exAll = exEvery.filter(a => a[0] === k), exK = exAll.map(a => strToD(a[1]));
   const Lmed = medL(exAll);
   const L = Math.max(0, Lin || 0), inkR = L ? L / Lmed : 1, im = MODE === 'ink' ? inkMult(inkR) : 1;
   const nEx = Math.max(1, exK.length || cats[k].n);
   if (ds) {
     const d = strToD(ds), p2 = forward(decodeNet(br.net), d);
-    let g = 0; for (let i = 1; i < p2.length; i++) if (p2[i] > p2[g]) g = i;
-    sim = exK.length ? simTo(d, exK) : 1; prob = p2[k];
+    // זיהוי משולב: הרשת + הציור הכי דומה ששמר בעל המוח
+    let P = p2, sv = null;
+    if (exK.length) {
+      const topP = [...p2].map((v, i) => [v, i]).sort((a, b) => b[0] - a[0]).slice(0, 6).map(x => x[1]);
+      sv = wordSims(d, exEvery.map(a => ({ c: a[0], d: strToD(a[1]) })), p2.length, [k, ...topP]); P = mixP(p2, sv);
+    }
+    let g = 0; for (let i = 1; i < P.length; i++) if (P[i] > P[g]) g = i;
+    sim = sv ? sv[k] : 1; prob = P[k];
     ok = g === k && sim >= SIM_OK; conf = prob * simFactor(sim); guess = g === k && !ok ? '' : cats[g].w;
   }
   const K = cats.filter(x => x.n >= MIN_EX).length, pts = scoreFor(c.lvl, K, conf, ok, nEx, c.curse, im);
