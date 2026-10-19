@@ -174,6 +174,17 @@ body.solo nav,body.solo #hScore,body.solo #hBell,body.solo #hMe,body.solo #wPub{
 .tinyWrap{position:absolute;inset:0;overflow:hidden;border-radius:6px;z-index:1;pointer-events:none}
 .tinyWrap i{position:absolute;left:33.2%;top:33.2%;width:33.6%;height:33.6%;border:2px dashed var(--accent);border-radius:4px;box-shadow:0 0 0 999px rgba(242,233,216,.85)}
 #pad{transition:none}
+.learnFx{position:absolute;inset:0;z-index:4;border-radius:6px;background:#1F2440;overflow:hidden;transition:opacity .25s;cursor:pointer}
+.learnFx.hide{display:none}
+.learnFx.out{opacity:0}
+.learnFx canvas{position:absolute;inset:0;width:100%;height:100%}
+.fxBrain{position:absolute;width:38%;height:38%;left:31%;top:23%;opacity:0;transform:scale(.55);transition:opacity .35s,transform .5s cubic-bezier(.16,1,.3,1)}
+.learnFx.b .fxBrain{opacity:1;transform:none}
+.learnFx.pulse .fxBrain{animation:bp .8s ease-in-out infinite}
+.learnFx.done .fxBrain{animation:none;transform:scale(1.12)}
+@keyframes bp{50%{transform:scale(1.07)}}
+.fxTxt{position:absolute;bottom:11%;left:0;right:0;text-align:center;color:#fff;font-weight:600;font-size:20px}
+.learnFx.done .fxTxt{color:#9BE3BC}
 .blind{position:absolute;inset:0;z-index:1;border-radius:6px;background:#fff;display:grid;place-items:center;pointer-events:none;color:#C9C3B5;font-weight:500;font-size:16px}
 
 /* כיכר */
@@ -593,6 +604,49 @@ const blind=document.createElement('div');blind.className='blind hide';blind.inn
 const ghost=document.createElement('canvas');ghost.width=ghost.height=280;ghost.className='ghost hide';const gctx=ghost.getContext('2d');
 const tinyBox=document.createElement('div');tinyBox.className='tinyWrap hide';tinyBox.innerHTML='<i></i>';
 padWrap.append(blind,ghost,tinyBox);
+/* אנימציית למידה: הפיקסלים של הציור זורמים אל המוח */
+const fx=document.createElement('div');fx.className='learnFx hide';
+fx.innerHTML='<canvas></canvas><svg class="fxBrain" viewBox="0 0 64 64" aria-hidden="true"><use href="#mascotBig"/></svg><div class="fxTxt" role="status"></div>';
+padWrap.append(fx);
+let fxRun=0;
+function learnFx(d){
+ const run=++fxRun,cv=fx.querySelector('canvas'),txt=fx.querySelector('.fxTxt');
+ const W=padWrap.clientWidth||280,dpr=Math.min(2,devicePixelRatio||1);cv.width=cv.height=Math.round(W*dpr);
+ const g=cv.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);
+ const cs=W/N,cx=W/2,cy=W*.42,R=W*.13,cells=[];
+ for(let i=0;i<IN;i++)if(d[i]>2){const x=i%N,y=(i/N)|0;cells.push({x:x*cs,y:y*cs,v:d[i]/15,del:Math.random()*320,tx:cx+(Math.random()-.5)*R*1.6,ty:cy+(Math.random()-.5)*R*1.3});}
+ fx.className='learnFx';txt.textContent='המוח לומד…';
+ const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+ const t0=performance.now(),SCAN=480,FLY=900,MIN=1500,MAX=6000;
+ const ease=t=>1-Math.pow(1-t,3),easeIn=t=>t*t*t;
+ let finished=false;
+ function finish(){if(finished||run!==fxRun)return;finished=true;fx.classList.add('done');fx.classList.remove('pulse');txt.textContent='נשמר בזיכרון ✓';
+  setTimeout(()=>{if(run!==fxRun)return;fx.classList.add('out');setTimeout(()=>{if(run===fxRun)fx.className='learnFx hide';},260);},650);}
+ fx.onclick=()=>{if(performance.now()-t0>SCAN)finish();};
+ function frame(now){
+  if(run!==fxRun)return;const t=now-t0;g.clearRect(0,0,W,W);
+  g.strokeStyle='rgba(255,255,255,.07)';g.lineWidth=1;
+  for(let k=1;k<N;k++){g.beginPath();g.moveTo(k*cs,0);g.lineTo(k*cs,W);g.moveTo(0,k*cs);g.lineTo(W,k*cs);g.stroke();}
+  if(!reduce&&t<SCAN){
+   const sy=t/SCAN*W;
+   for(const c of cells)if(c.y<sy){g.fillStyle=`rgba(255,227,214,${.25+c.v*.75})`;g.fillRect(c.x+1,c.y+1,cs-2,cs-2);}
+   const grd=g.createLinearGradient(0,sy-28,0,sy);grd.addColorStop(0,'rgba(226,70,31,0)');grd.addColorStop(1,'rgba(226,70,31,.55)');g.fillStyle=grd;g.fillRect(0,sy-28,W,28);
+   g.fillStyle='#E2461F';g.fillRect(0,sy-2,W,2);
+  }else{
+   if(!fx.classList.contains('b')){fx.classList.add('b');}
+   const tf=reduce?FLY:t-SCAN;let left=0;
+   for(const c of cells){const p=Math.min(1,Math.max(0,(tf-c.del)/(FLY-320)));if(p<1)left++;
+    const e=easeIn(p),x=c.x+(c.tx-c.x)*e,y=c.y+(c.ty-c.y)*e,sz=(cs-2)*(1-e*.75);
+    if(p>=1)continue;g.fillStyle=p<.5?`rgba(255,227,214,${.3+c.v*.7})`:`rgba(${Math.round(255-30*p)},${Math.round(227-150*p)},${Math.round(214-180*p)},${1-p*.4})`;
+    g.fillRect(x+(cs-sz)/2,y+(cs-sz)/2,sz,sz);}
+   if(!left&&!finished){fx.classList.add('pulse');
+    const k=(t/140)|0;for(let j=0;j<5;j++){const a=(k*0.7+j*1.256)%(Math.PI*2),r=R*1.55;g.fillStyle=['#E2461F','#6343D6','#1A8E58','#B87400','#F6D36B'][j];g.beginPath();g.arc(cx+Math.cos(a+t/420)*r,cy+Math.sin(a+t/420)*r*.85,3,0,7);g.fill();}
+    if((t>MIN&&!T.on)||t>MAX)finish();}
+  }
+  if(!finished||!fx.classList.contains('out'))requestAnimationFrame(frame);
+ }
+ requestAnimationFrame(frame);
+}
 const TINY=[93,93,187,187];
 let drawing=false,last=null,hasInk=false,tool='pen',padLocked=false,onStroke=null,curse=null,strokes=0,curseT=0,curseTimer=0,strokeStart=null,strokeSnap=null,rotA=0,rotRAF=0,fadeRAF=0,inkLen=0,lastL=0,bx0=1e9,by0=1e9,bx1=-1e9,by1=-1e9;
 function clearPad(){inkLen=0;lastL=0;bx0=by0=1e9;bx1=by1=-1e9;pctx.fillStyle='#fff';pctx.fillRect(0,0,280,280);gctx.clearRect(0,0,280,280);hasInk=false;padHint.textContent='ציירו כאן';strokes=0;curseT=0;clearInterval(curseTimer);if(curse)padLocked=false;paintCurse();}
@@ -777,8 +831,8 @@ function paintWordActs(){
 $('#wSave').onclick=()=>{
  const d=grabPad();if(!d){toast('הלוח ריק – ציירו קודם');return;}
  const k=ensureCat(cur.word);if(byCat()[k].length>=MAX_EX)return;
- S.ex.push({c:k,d,L:lastL});clearPad();renderWord();dirty();kickTrain();
- const n=byCat()[k].length;toast(n===1&&readyWords()===MIN_WORDS&&!SOLO?'5 מילים במוח! עכשיו אפשר לפרסם אתגרים':`נשמר · ${n}/${MAX_EX}`);
+ S.ex.push({c:k,d,L:lastL});learnFx(d);clearPad();renderWord();dirty();kickTrain();
+ const n=byCat()[k].length;if(n===1&&readyWords()===MIN_WORDS&&!SOLO)setTimeout(()=>toast('5 מילים במוח! עכשיו אפשר לפרסם אתגרים'),1800);
 };
 async function delExample(e){
  const k=e.c,n=byCat()[k].length;
