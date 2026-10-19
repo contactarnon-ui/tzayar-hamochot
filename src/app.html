@@ -609,7 +609,7 @@ const fx=document.createElement('div');fx.className='learnFx hide';
 fx.innerHTML='<canvas></canvas><svg class="fxBrain" viewBox="0 0 64 64" aria-hidden="true"><use href="#mascotBig"/></svg><div class="fxTxt" role="status"></div>';
 padWrap.append(fx);
 let fxRun=0;
-function learnFx(d){
+function learnFx(d,word){
  const run=++fxRun,cv=fx.querySelector('canvas'),txt=fx.querySelector('.fxTxt');
  const W=padWrap.clientWidth||280,dpr=Math.min(2,devicePixelRatio||1);cv.width=cv.height=Math.round(W*dpr);
  const g=cv.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);
@@ -620,7 +620,7 @@ function learnFx(d){
  const t0=performance.now(),SCAN=480,FLY=900,MIN=1500,MAX=6000;
  const ease=t=>1-Math.pow(1-t,3),easeIn=t=>t*t*t;
  let finished=false;
- function finish(){if(finished||run!==fxRun)return;finished=true;fx.classList.add('done');fx.classList.remove('pulse');txt.textContent='נשמר בזיכרון ✓';
+ function finish(){if(finished||run!==fxRun)return;finished=true;fx.classList.add('done');fx.classList.remove('pulse');txt.textContent=word?`נשמר: "${word}" ✓`:'נשמר בזיכרון ✓';
   setTimeout(()=>{if(run!==fxRun)return;fx.classList.add('out');setTimeout(()=>{if(run===fxRun)fx.className='learnFx hide';},260);},650);}
  fx.onclick=()=>{if(performance.now()-t0>SCAN)finish();};
  function frame(now){
@@ -895,7 +895,7 @@ function renderPick(){
 }
 function teachFromTest(k){
  if(!lastTestD)return;if(byCat()[k].length>=MAX_EX){toast(`"${S.cats[k].w}" כבר מלאה (10/10)`);return;}
- S.ex.push({c:k,d:lastTestD,L:lastL});dirty();kickTrain();toast(`תודה! המוח ילמד שזה "${S.cats[k].w}"`);clearPad();$('#tGuess').innerHTML='';$('#tBars').innerHTML='';lastTestD=null;
+ S.ex.push({c:k,d:lastTestD,L:lastL});learnFx(lastTestD,S.cats[k].w);dirty();kickTrain();clearPad();$('#tGuess').innerHTML='';$('#tBars').innerHTML='';lastTestD=null;
 }
 
 /* ---------- כיכר ---------- */
