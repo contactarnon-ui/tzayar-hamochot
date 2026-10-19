@@ -435,7 +435,17 @@ function botNet(n) {
 async function ensureBots(env, ns) {
   const DB = env.DB;
   const have = await DB.prepare(`SELECT COUNT(*) n FROM players WHERE ns=? AND id LIKE 'bot_%'`).bind(ns).first();
-  if (have.n >= BOTS.bots.length) return;
+  if (have.n >= BOTS.bots.length) {
+    // מוחות רובוטים מגרסה ישנה – מוחלפים במוח המאומן החדש (2 בכל פעם). rounds = מספר הגרסה
+    const ver = BOTS.ver || 1;
+    const { results: old } = await DB.prepare(`SELECT player_id FROM brains WHERE ns=? AND player_id LIKE 'bot_%' AND rounds<? LIMIT 2`).bind(ns, ver).all();
+    for (const o of old) {
+      const i = +o.player_id.split('_').pop(), bt = BOTS.bots[i]; if (!bt) continue;
+      await DB.prepare('UPDATE brains SET cats=?,ready_words=?,net=?,ex=?,rounds=?,updated=? WHERE player_id=?')
+        .bind(JSON.stringify(bt.cats), bt.cats.length, botNet(bt.net), bt.ex, ver, now(), o.player_id).run();
+    }
+    return;
+  }
   let added = 0; // מעט בכל פעם – כדי לא לחרוג מזמן החישוב
   for (let i = 0; i < BOTS.bots.length && added < 2; i++) {
     const bt = BOTS.bots[i], id = `bot_${ns}_${i}`;
@@ -445,7 +455,7 @@ async function ensureBots(env, ns) {
     if (await DB.prepare('SELECT 1 FROM players WHERE ns=? AND name=?').bind(ns, name).first()) name = name + ' ' + (i + 2);
     await DB.prepare('INSERT INTO players(id,ns,name,code,token,score,created) VALUES(?,?,?,?,?,0,?)').bind(id, ns, name, 'bot-' + uid(), 'bot-' + uid() + uid(), now()).run();
     await DB.prepare('INSERT OR REPLACE INTO brains(player_id,ns,cats,ready_words,net,ex,rounds,updated) VALUES(?,?,?,?,?,?,?,?)')
-      .bind(id, ns, JSON.stringify(bt.cats), bt.cats.length, botNet(bt.net), bt.ex, 1, now()).run();
+      .bind(id, ns, JSON.stringify(bt.cats), bt.cats.length, botNet(bt.net), bt.ex, BOTS.ver || 1, now()).run();
   }
 }
 function poolDrawing(word) {
