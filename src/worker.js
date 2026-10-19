@@ -443,6 +443,10 @@ async function ensureBots(env, ns) {
       const i = +o.player_id.split('_').pop(), bt = BOTS.bots[i]; if (!bt) continue;
       await DB.prepare('UPDATE brains SET cats=?,ready_words=?,net=?,ex=?,rounds=?,updated=? WHERE player_id=?')
         .bind(JSON.stringify(bt.cats), bt.cats.length, botNet(bt.net), bt.ex, ver, now(), o.player_id).run();
+      // אתגרים פתוחים על מילים שכבר לא במוח החדש – נסגרים
+      const keep = new Set(bt.cats.map(c => c.w));
+      const { results: oc } = await DB.prepare(`SELECT id,word FROM challenges WHERE owner_id=? AND status='open'`).bind(o.player_id).all();
+      for (const c of oc) if (!keep.has(c.word)) await DB.prepare(`UPDATE challenges SET status='closed',closed_at=? WHERE id=?`).bind(now(), c.id).run();
     }
     return;
   }
@@ -458,15 +462,12 @@ async function ensureBots(env, ns) {
       .bind(id, ns, JSON.stringify(bt.cats), bt.cats.length, botNet(bt.net), bt.ex, BOTS.ver || 1, now()).run();
   }
 }
-function poolDrawing(word) {
-  const p = BOTS.pool[word]; if (!p) return null;
-  const n = p.L.length, i = Math.floor(Math.random() * n);
-  let hex = '';
-  if (p.b2) { // 2 ביט לנקודה (קו נקי ומוחלק)
-    const s = atob(p.b2);
-    for (let q = 0; q < IN; q++) { const bit = (i * IN + q) * 2, byte = s.charCodeAt(bit >> 3), v = (byte >> (6 - (bit & 7))) & 3; hex += '05af'[v]; }
-  } else { const s = atob(p.b); for (let q = 0; q < IN; q++) { const byte = s.charCodeAt(i * 98 + (q >> 3)); hex += (byte >> (7 - (q & 7))) & 1 ? 'f' : '0'; } }
-  return { d: hex, L: p.L[i] };
+// ציור של רובוט מסוים (בסגנון שלו), כולל הקלטה קו אחרי קו
+function botDrawing(bi, word) {
+  const bt = BOTS.bots[bi], p = bt && bt.draw && bt.draw[word]; if (!p) return null;
+  const n = p.L.length, i = Math.floor(Math.random() * n), s = atob(p.b2);
+  let hex = ''; for (let q = 0; q < IN; q++) { const bit = (i * IN + q) * 2, byte = s.charCodeAt(bit >> 3), v = (byte >> (6 - (bit & 7))) & 3; hex += '05af'[v]; }
+  return { d: hex, L: p.L[i], rec: p.r ? p.r[i] : null };
 }
 // ציור ממה שלמדו מהשחקנים האמיתיים: ציורים ששמרו במוח שלהם או שזוהו באתגרים
 async function learnedDrawing(env, ns, word, ownerId) {
@@ -492,13 +493,15 @@ async function botTick(env, ns, ctx, origin) {
   for (const c of humanFirst.slice(0, 3)) {
     const { results: tried } = await DB.prepare('SELECT player_id FROM attempts WHERE challenge_id=?').bind(c.id).all();
     const triedSet = new Set(tried.map(t => t.player_id));
-    const cand = BOTS.bots.map((_, i) => `bot_${ns}_${i}`).filter(id => id !== c.owner_id && !triedSet.has(id));
-    if (!cand.length) continue;
-    const id = cand[Math.floor(Math.random() * cand.length)];
+    const all = BOTS.bots.map((_, i) => i).filter(i => `bot_${ns}_${i}` !== c.owner_id && !triedSet.has(`bot_${ns}_${i}`));
+    if (!all.length) continue;
+    // עדיפות לרובוט שיודע לצייר את המילה בסגנון שלו
+    const can = all.filter(i => BOTS.bots[i].draw && BOTS.bots[i].draw[c.word]), pool = can.length ? can : all;
+    const bi = pool[Math.floor(Math.random() * pool.length)], id = `bot_${ns}_${bi}`;
     const me = await DB.prepare('SELECT id,name FROM players WHERE id=?').bind(id).first(); if (!me) continue;
-    const dr = poolDrawing(c.word) || await learnedDrawing(env, ns, c.word, c.owner_id);
+    const dr = botDrawing(bi, c.word) || await learnedDrawing(env, ns, c.word, c.owner_id);
     if (!dr) { log.push(`אין ציור ל"${c.word}"`); continue; }
-    const r = await runAttempt(env, ns, me, c, dr.d, dr.L, ctx, origin);
+    const r = await runAttempt(env, ns, me, c, dr.d, dr.L, ctx, origin, dr.rec || null);
     log.push(`${me.name} → "${c.word}" של ${c.owner}: ${r.error || (r.ok ? 'זוהה' : 'לא זוהה') + ' ' + (r.points ?? '')}`);
     break;
   }
