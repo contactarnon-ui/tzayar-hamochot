@@ -25,13 +25,14 @@ export function scoreFor(lvl, k, conf, ok, n, curse, extra = 1) {
 function maxScore(lvl, k, n, curse) { return Math.round((BASE[lvl] || 10) * (1 + sizeBonus(k)) * riskMult(n) * curseMult(curse)); }
 const CURSES = ['line', 'three', 'mirror', 'white', 'time', 'straight', 'flip', 'rotate', 'shaky', 'dots', 'fade', 'tiny', 'fat'];
 /* דמיון: הציור מושווה לציורים שבעל המוח שמר למילה */
-const SIM_OK = 0.74, SIM_LO = 0.6, SIM_HI = 0.9;
-const SIM_TF = [0, 2, 4, 6]; // רגיל, הפוך 180°, מראה, מראה הפוכה
+const SIM_OK = 0.76, SIM_LO = 0.62, SIM_HI = 0.92;
+const SIM_TF = [-45, -30, -15, 0, 15, 30, 45]; // הטיה עד 45° לכל כיוון, בלי היפוכים
 function blur2(d) { let o = Float32Array.from(d); for (let pass = 0; pass < 2; pass++) { const n = new Float32Array(IN); for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { let s = 0, c = 0; for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) { const yy = y + a, xx = x + b; if (yy < 0 || yy >= N || xx < 0 || xx >= N) continue; s += o[yy * N + xx]; c++; } n[y * N + x] = s / c; } o = n; } return o; }
 // מתאם (פירסון): משווה צורה, לא רק כמות דיו במרכז
 function cosSim(a,b){let ma=0,mb=0;const n=a.length;for(let i=0;i<n;i++){ma+=a[i];mb+=b[i];}ma/=n;mb/=n;let s=0,x=0,y=0;for(let i=0;i<n;i++){const u=a[i]-ma,v=b[i]-mb;s+=u*v;x+=u*u;y+=v*v;}return s/Math.sqrt(x*y+1e-9);}
 // היפוכים וסיבובים: 4 סיבובים × עם/בלי מראה
-function tf8(d, k) { if (!k) return d; const o = new d.constructor(d.length); for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { let a = (k & 4) ? N - 1 - x : x, b = y; for (let r = 0; r < (k & 3); r++) { const t = a; a = N - 1 - b; b = t; } o[b * N + a] = d[y * N + x]; } return o; }
+// הטיה קלה בלבד: סיבוב בזווית (מעלות), בלי היפוכים
+function tf8(d,deg){if(!deg)return d;const o=new d.constructor(d.length),r=deg*Math.PI/180,c=Math.cos(r),s=Math.sin(r),m=(N-1)/2,isI=!(d instanceof Float32Array);for(let y=0;y<N;y++)for(let x=0;x<N;x++){const u=c*(x-m)+s*(y-m)+m,v=-s*(x-m)+c*(y-m)+m,x0=Math.floor(u),y0=Math.floor(v),fx=u-x0,fy=v-y0;let val=0;for(const [dx,dy,w] of [[0,0,(1-fx)*(1-fy)],[1,0,fx*(1-fy)],[0,1,(1-fx)*fy],[1,1,fx*fy]]){const xx=x0+dx,yy=y0+dy;if(xx>=0&&xx<N&&yy>=0&&yy<N)val+=d[yy*N+xx]*w;}o[y*N+x]=isI?Math.round(val):val;}return o;}
 function simTo(d, exs) { const bd = blur2(d), eb = exs.map(blur2); let m = 0; for (const k of SIM_TF) { const t = tf8(bd, k); for (const e of eb) m = Math.max(m, cosSim(t, e)); } return m; }
 const simFactor = s => Math.min(1, Math.max(0, (s - SIM_LO) / (SIM_HI - SIM_LO)));
 async function unzipEx(b) {
@@ -242,7 +243,13 @@ async function api(req, env, ctx, url) {
     const a = await DB.prepare(`SELECT a.id,a.word,a.lvl,a.ok,a.conf,a.guess,a.points,a.d,a.created,a.player_id,a.owner_id,d.name drawer,(a.player_id LIKE 'bot_%') bot,r.rec FROM attempts a JOIN players d ON d.id=a.player_id LEFT JOIN recs r ON r.attempt_id=a.id WHERE a.id=?`).bind(mRec[1]).first();
     if (!a || (a.owner_id !== me.id && a.player_id !== me.id)) return err('לא נמצא', 404);
     const { player_id, owner_id, ...rest } = a;
-    return json({ attempt: rest });
+    const ow = await DB.prepare('SELECT name FROM players WHERE id=?').bind(owner_id).first();
+    return json({ attempt: { ...rest, mine: player_id === me.id, owner: ow ? ow.name : '' } });
+  }
+  // הניסיונות שלי באתגר מסוים (כדי ללמוד מהכישלונות)
+  if (p === '/api/mytries') {
+    const { results } = await DB.prepare(`SELECT id,ok,conf,guess,points,d,created FROM attempts WHERE challenge_id=? AND player_id=? ORDER BY created ASC LIMIT 30`).bind(url.searchParams.get('c') || '', me.id).all();
+    return json({ attempts: results });
   }
   if (p === '/api/notes/seen' && m === 'POST') {
     await DB.prepare('UPDATE notes SET seen=1 WHERE player_id=?').bind(me.id).run();

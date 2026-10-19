@@ -25,9 +25,10 @@ const riskMult=n=>Math.round((3-(Math.min(MAX_EX,Math.max(1,n))-1)*2/9)*10)/10;
 const CM={mirror:1.5},cmul=c=>CM[c]||1;
 const scoreFor=(l,k,c,ok,n,cu)=>{const b=BASE[l]||10,m=riskMult(n)*cmul(cu);return ok?Math.max(1,Math.round(b*(1+sizeBonus(k))*m*c)):-Math.round(b/2*m);};
 const maxScore=(l,k,n,cu)=>Math.round((BASE[l]||10)*(1+sizeBonus(k))*riskMult(n)*cmul(cu));
-const CURSES=['line','three','mirror','white','time','straight','flip','rotate','shaky','dots','fade','tiny','fat'],SIM_OK=0.74,SIM_LO=0.6,SIM_HI=0.9,SIM_TF=[0,2,4,6];
+const CURSES=['line','three','mirror','white','time','straight','flip','rotate','shaky','dots','fade','tiny','fat'],SIM_OK=0.76,SIM_LO=0.62,SIM_HI=0.92,SIM_TF=[-45,-30,-15,0,15,30,45];
 function blur2(d){let o=Float32Array.from(d);for(let pass=0;pass<2;pass++){const n=new Float32Array(IN);for(let y=0;y<N;y++)for(let x=0;x<N;x++){let s=0,c=0;for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const yy=y+a,xx=x+b;if(yy<0||yy>=N||xx<0||xx>=N)continue;s+=o[yy*N+xx];c++;}n[y*N+x]=s/c;}o=n;}return o;}
-function tf8(d,k){if(!k)return d;const o=new d.constructor(d.length);for(let y=0;y<N;y++)for(let x=0;x<N;x++){let a=(k&4)?N-1-x:x,b=y;for(let r=0;r<(k&3);r++){const t=a;a=N-1-b;b=t;}o[b*N+a]=d[y*N+x];}return o;}
+// הטיה קלה בלבד: סיבוב בזווית (מעלות), בלי היפוכים
+function tf8(d,deg){if(!deg)return d;const o=new d.constructor(d.length),r=deg*Math.PI/180,c=Math.cos(r),s=Math.sin(r),m=(N-1)/2,isI=!(d instanceof Float32Array);for(let y=0;y<N;y++)for(let x=0;x<N;x++){const u=c*(x-m)+s*(y-m)+m,v=-s*(x-m)+c*(y-m)+m,x0=Math.floor(u),y0=Math.floor(v),fx=u-x0,fy=v-y0;let val=0;for(const [dx,dy,w] of [[0,0,(1-fx)*(1-fy)],[1,0,fx*(1-fy)],[0,1,(1-fx)*fy],[1,1,fx*fy]]){const xx=x0+dx,yy=y0+dy;if(xx>=0&&xx<N&&yy>=0&&yy<N)val+=d[yy*N+xx]*w;}o[y*N+x]=isI?Math.round(val):val;}return o;}
 function cosSim(a,b){let ma=0,mb=0;const n=a.length;for(let i=0;i<n;i++){ma+=a[i];mb+=b[i];}ma/=n;mb/=n;let s=0,x=0,y=0;for(let i=0;i<n;i++){const u=a[i]-ma,v=b[i]-mb;s+=u*v;x+=u*u;y+=v*v;}return s/Math.sqrt(x*y+1e-9);}
 const hexD=s=>{const d=new Uint8Array(IN);for(let i=0;i<IN;i++)d[i]=parseInt(s[i],16)||0;return d;};
 async function unzipEx(b){if(!b)return [];if(b[0]==='P')return JSON.parse(decodeURIComponent(escape(atob(b.slice(1)))));const s=atob(b.slice(1)),u=new Uint8Array(s.length);for(let i=0;i<s.length;i++)u[i]=s.charCodeAt(i);return JSON.parse(await new Response(new Blob([u]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text());}
