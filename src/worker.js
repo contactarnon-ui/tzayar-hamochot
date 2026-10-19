@@ -76,6 +76,7 @@ function json(o, status = 200) {
 }
 const err = (msg, status = 400) => json({ error: msg }, status);
 const MODE = /*__MODE__*/'curse';
+const NS_PLAIN = false;
 function nsOf(url) { const b = url.searchParams.get('ns') === 'test' ? 'test' : 'live'; return MODE === 'ink' ? 'ink' + b : b; }
 // דיו: יחס בין אורך הקו של המצייר לאורך הקו בציורים של בעל המוח
 const INK_MAX = 10, DEF_L = 3;
@@ -174,14 +175,18 @@ async function api(req, env, ctx, url) {
     return json({ notes: results });
   }
   if (p === '/api/leaders') {
-    const { results } = await DB.prepare(`SELECT p.id,p.name,p.score,COALESCE(b.ready_words,0) words FROM players p LEFT JOIN brains b ON b.player_id=p.id WHERE p.ns=? ORDER BY p.score DESC, p.created ASC LIMIT 30`).bind(ns).all();
+    const { results } = await DB.prepare(`SELECT p.id,p.name,p.score,(p.id LIKE 'bot_%') bot,COALESCE(b.ready_words,0) words FROM players p LEFT JOIN brains b ON b.player_id=p.id WHERE p.ns=? ORDER BY p.score DESC, p.created ASC LIMIT 30`).bind(ns).all();
     return json({ leaders: results });
   }
   if (p === '/api/feed') {
-    const { results } = await DB.prepare(`SELECT a.word,a.lvl,a.ok,a.conf,a.points,a.k,a.guess,a.created,d.name drawer,o.name owner FROM attempts a JOIN players d ON d.id=a.player_id JOIN players o ON o.id=a.owner_id WHERE a.ns=? ORDER BY a.created DESC LIMIT 40`).bind(ns).all();
+    const { results } = await DB.prepare(`SELECT a.word,a.lvl,a.ok,a.conf,a.points,a.k,a.guess,a.created,d.name drawer,o.name owner,(a.player_id LIKE 'bot_%') dbot,(a.owner_id LIKE 'bot_%') obot FROM attempts a JOIN players d ON d.id=a.player_id JOIN players o ON o.id=a.owner_id WHERE a.ns=? ORDER BY a.created DESC LIMIT 40`).bind(ns).all();
     const stats = await DB.prepare(`SELECT lvl, COUNT(*) n, SUM(ok) ok, AVG(CASE WHEN ok=1 THEN conf END) conf FROM attempts WHERE ns=? GROUP BY lvl`).bind(ns).all();
     const open = await DB.prepare(`SELECT COUNT(*) n FROM challenges WHERE ns=? AND status='open'`).bind(ns).first();
     return json({ feed: results, stats: stats.results, open: open.n });
+  }
+  if (p === '/api/bots/tick' && m === 'POST') {
+    if (!ns.endsWith('test')) return err('רק בסביבת הבדיקה', 403);
+    return json({ log: await botTick(env, ns, ctx, origin) });
   }
   if (p === '/api/reset' && m === 'POST') {
     if (!ns.endsWith('test')) return err('אפשר לאפס רק את סביבת הבדיקה', 403);
@@ -239,7 +244,7 @@ async function api(req, env, ctx, url) {
   }
 
   if (p === '/api/square') {
-    const { results } = await DB.prepare(`SELECT c.id,c.word,c.lvl,c.tries,c.created,c.curse,o.name owner,COALESCE(b.ready_words,0) k,b.cats,b.ex
+    const { results } = await DB.prepare(`SELECT c.id,c.word,c.lvl,c.tries,c.created,c.curse,o.name owner,(c.owner_id LIKE 'bot_%') bot,COALESCE(b.ready_words,0) k,b.cats,b.ex
       FROM challenges c JOIN players o ON o.id=c.owner_id LEFT JOIN brains b ON b.player_id=c.owner_id
       WHERE c.ns=? AND c.status='open' AND c.owner_id<>? AND NOT EXISTS (SELECT 1 FROM attempts a WHERE a.challenge_id=c.id AND a.player_id=?)
       ORDER BY c.created DESC LIMIT 60`).bind(ns, me.id, me.id).all();
@@ -286,50 +291,150 @@ async function api(req, env, ctx, url) {
     const b = await body(req);
     const c = await DB.prepare(`SELECT c.*,o.name owner FROM challenges c JOIN players o ON o.id=c.owner_id WHERE c.id=? AND c.ns=?`).bind(b.id, ns).first();
     if (!c) return err('האתגר לא נמצא', 404);
-    if (c.owner_id === me.id) return err('אי אפשר לאתגר את המוח של עצמך');
-    if (c.status !== 'open') return err(c.status === 'solved' ? 'מישהו כבר פתר את האתגר הזה' : 'האתגר נסגר');
-    if (await DB.prepare('SELECT 1 FROM attempts WHERE challenge_id=? AND player_id=?').bind(c.id, me.id).first()) return err('כבר ניסית את האתגר הזה');
-    const br = await DB.prepare('SELECT cats,ready_words,net,ex FROM brains WHERE player_id=?').bind(c.owner_id).first();
-    const cats = br ? JSON.parse(br.cats) : [];
-    const k = cats.findIndex(x => x.w === c.word);
-    if (!br || !br.net || k < 0) return err('המוח של בעל האתגר השתנה – האתגר נסגר');
     const ds = typeof b.d === 'string' && /^[0-9a-f]{784}$/.test(b.d) ? b.d : null;
-    let ok = false, conf = 0, guess = '', sim = 0, prob = 0;
-    const exAll = (await unzipEx(br.ex)).filter(a => a[0] === k), exK = exAll.map(a => strToD(a[1]));
-    const Lmed = medL(exAll);
-    const L = Math.max(0, +b.L || 0), inkR = L ? L / Lmed : 1, im = MODE === 'ink' ? inkMult(inkR) : 1;
-    const nEx = Math.max(1, exK.length || cats[k].n);
-    if (ds) {
-      const d = strToD(ds), p2 = forward(decodeNet(br.net), d);
-      let g = 0; for (let i = 1; i < p2.length; i++) if (p2[i] > p2[g]) g = i;
-      sim = exK.length ? simTo(d, exK) : 1; prob = p2[k];
-      ok = g === k && sim >= SIM_OK; conf = prob * simFactor(sim); guess = g === k && !ok ? '' : cats[g].w;
-    }
-    const K = cats.filter(x => x.n >= MIN_EX).length, pts = scoreFor(c.lvl, K, conf, ok, nEx, c.curse, im);
-    // נעילה: רק הניסיון הראשון שמצליח פותר
-    if (ok) {
-      const upd = await DB.prepare(`UPDATE challenges SET status='solved',solved_by=?,closed_at=?,tries=tries+1 WHERE id=? AND status='open'`).bind(me.id, now(), c.id).run();
-      if (!upd.meta.changes) return err('מישהו פתר את האתגר שנייה לפניך');
-    } else await DB.prepare('UPDATE challenges SET tries=tries+1 WHERE id=?').bind(c.id).run();
-    await DB.batch([
-      DB.prepare('INSERT INTO attempts(id,ns,challenge_id,player_id,owner_id,word,lvl,ok,conf,guess,points,k,d,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-        .bind(uid(), ns, c.id, me.id, c.owner_id, c.word, c.lvl, ok ? 1 : 0, conf, guess, pts, K, ds, now()),
-      DB.prepare('UPDATE players SET score=score+? WHERE id IN (?,?)').bind(pts, me.id, c.owner_id)]);
-    const pc = Math.round(conf * 100);
-    const gain = ok ? `קיבלת ${pts} נקודות` : `איבדת ${-pts} נקודות`;
-    await note(env, ns, c.owner_id, ok ? 'win' : 'lose', ok
-      ? `${me.name} צייר "${c.word}" – המוח שלך זיהה ב־${pc}%. ${gain}`
-      : guess ? `${me.name} צייר "${c.word}" – המוח שלך חשב שזה "${guess}". ${gain}` : `${me.name} צייר "${c.word}" – לא דומה מספיק לציורים שלך. ${gain}`, pts, ctx, origin);
-    await note(env, ns, me.id, ok ? 'dwin' : 'dlose', ok
-      ? `המוח של ${c.owner} זיהה את "${c.word}" שלך ב־${pc}%. ${gain}`
-      : `המוח של ${c.owner} לא זיהה את "${c.word}" שלך. ${gain}`, pts, ctx, origin);
-    return json({ ok, conf, guess, sim, prob, n: nEx, mult: riskMult(nEx), cmult: curseMult(c.curse), imult: im, inkR, mode: MODE, points: pts, k: K, lvl: c.lvl, word: c.word, owner: c.owner, empty: !ds });
+    const r = await runAttempt(env, ns, me, c, ds, +b.L || 0, ctx, origin);
+    return r.error ? err(r.error) : json(r);
   }
   return err('לא נמצא', 404);
 }
 
+
+/* ---------- ניסיון אתגר (משותף לשחקנים ולרובוטים) ---------- */
+const isBot = id => typeof id === 'string' && id.startsWith('bot_');
+async function runAttempt(env, ns, me, c, ds, Lin, ctx, origin) {
+  const DB = env.DB;
+  if (c.owner_id === me.id) return { error: 'אי אפשר לאתגר את המוח של עצמך' };
+  if (c.status !== 'open') return { error: c.status === 'solved' ? 'מישהו כבר פתר את האתגר הזה' : 'האתגר נסגר' };
+  if (await DB.prepare('SELECT 1 FROM attempts WHERE challenge_id=? AND player_id=?').bind(c.id, me.id).first()) return { error: 'כבר ניסית את האתגר הזה' };
+  const br = await DB.prepare('SELECT cats,ready_words,net,ex FROM brains WHERE player_id=?').bind(c.owner_id).first();
+  const cats = br ? JSON.parse(br.cats) : [];
+  const k = cats.findIndex(x => x.w === c.word);
+  if (!br || !br.net || k < 0) return { error: 'המוח של בעל האתגר השתנה – האתגר נסגר' };
+  let ok = false, conf = 0, guess = '', sim = 0, prob = 0;
+  const exAll = (await unzipEx(br.ex)).filter(a => a[0] === k), exK = exAll.map(a => strToD(a[1]));
+  const Lmed = medL(exAll);
+  const L = Math.max(0, Lin || 0), inkR = L ? L / Lmed : 1, im = MODE === 'ink' ? inkMult(inkR) : 1;
+  const nEx = Math.max(1, exK.length || cats[k].n);
+  if (ds) {
+    const d = strToD(ds), p2 = forward(decodeNet(br.net), d);
+    let g = 0; for (let i = 1; i < p2.length; i++) if (p2[i] > p2[g]) g = i;
+    sim = exK.length ? simTo(d, exK) : 1; prob = p2[k];
+    ok = g === k && sim >= SIM_OK; conf = prob * simFactor(sim); guess = g === k && !ok ? '' : cats[g].w;
+  }
+  const K = cats.filter(x => x.n >= MIN_EX).length, pts = scoreFor(c.lvl, K, conf, ok, nEx, c.curse, im);
+  // רובוט שנכשל באתגר של שחקן אמיתי – השחקן לא מפסיד
+  const ownerPts = (!ok && isBot(me.id) && !isBot(c.owner_id)) ? 0 : pts;
+  if (ok) {
+    const upd = await DB.prepare(`UPDATE challenges SET status='solved',solved_by=?,closed_at=?,tries=tries+1 WHERE id=? AND status='open'`).bind(me.id, now(), c.id).run();
+    if (!upd.meta.changes) return { error: 'מישהו פתר את האתגר שנייה לפניך' };
+  } else await DB.prepare('UPDATE challenges SET tries=tries+1 WHERE id=?').bind(c.id).run();
+  await DB.batch([
+    DB.prepare('INSERT INTO attempts(id,ns,challenge_id,player_id,owner_id,word,lvl,ok,conf,guess,points,k,d,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+      .bind(uid(), ns, c.id, me.id, c.owner_id, c.word, c.lvl, ok ? 1 : 0, conf, guess, pts, K, ds, now()),
+    DB.prepare('UPDATE players SET score=score+? WHERE id=?').bind(pts, me.id),
+    DB.prepare('UPDATE players SET score=score+? WHERE id=?').bind(ownerPts, c.owner_id)]);
+  const pc = Math.round(conf * 100);
+  const gain = v => v > 0 ? `קיבלת ${v} נקודות` : v < 0 ? `איבדת ${-v} נקודות` : 'לא הפסדת נקודות';
+  const who = isBot(me.id) ? `🤖 ${me.name}` : me.name;
+  if (!isBot(c.owner_id)) await note(env, ns, c.owner_id, ok ? 'win' : 'lose', ok
+    ? `${who} צייר "${c.word}" – המוח שלך זיהה ב־${pc}%. ${gain(ownerPts)}`
+    : guess ? `${who} צייר "${c.word}" – המוח שלך חשב שזה "${guess}". ${gain(ownerPts)}` : `${who} צייר "${c.word}" – לא דומה מספיק לציורים שלך. ${gain(ownerPts)}`, ownerPts, ctx, origin);
+  if (!isBot(me.id)) await note(env, ns, me.id, ok ? 'dwin' : 'dlose', ok
+    ? `המוח של ${c.owner} זיהה את "${c.word}" שלך ב־${pc}%. ${gain(pts)}`
+    : `המוח של ${c.owner} לא זיהה את "${c.word}" שלך. ${gain(pts)}`, pts, ctx, origin);
+  return { ok, conf, guess, sim, prob, n: nEx, mult: riskMult(nEx), cmult: curseMult(c.curse), imult: im, inkR, mode: MODE, points: pts, k: K, lvl: c.lvl, word: c.word, owner: c.owner, ownerBot: isBot(c.owner_id), empty: !ds };
+}
+
+/* ---------- שחקני מחשב ---------- */
+const BOT_MAX_OPEN = 2, BOT_TOTAL_OPEN = 14;
+function b64f32(b) { return b64ToF32(b); }
+function f32b64(a) { const u = new Uint8Array(a.buffer, a.byteOffset, a.byteLength); let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); }
+function botNet(n) {
+  const s = atob(n.q), sc = b64f32(n.s), W1 = new Float32Array(64 * IN);
+  for (let j = 0; j < 64; j++) for (let i = 0; i < IN; i++) { let v = s.charCodeAt(j * IN + i); if (v > 127) v -= 256; W1[j * IN + i] = v * sc[j]; }
+  return JSON.stringify({ H: 64, W1: f32b64(W1), b1: n.b1, W2: n.W2, b2: n.b2 });
+}
+async function ensureBots(env, ns) {
+  const DB = env.DB;
+  const have = await DB.prepare(`SELECT COUNT(*) n FROM players WHERE ns=? AND id LIKE 'bot_%'`).bind(ns).first();
+  if (have.n >= BOTS.bots.length) return;
+  let added = 0; // מעט בכל פעם – כדי לא לחרוג מזמן החישוב
+  for (let i = 0; i < BOTS.bots.length && added < 2; i++) {
+    const bt = BOTS.bots[i], id = `bot_${ns}_${i}`;
+    if (await DB.prepare('SELECT 1 FROM players WHERE id=?').bind(id).first()) continue;
+    added++;
+    let name = bt.name;
+    if (await DB.prepare('SELECT 1 FROM players WHERE ns=? AND name=?').bind(ns, name).first()) name = name + ' ' + (i + 2);
+    await DB.prepare('INSERT INTO players(id,ns,name,code,token,score,created) VALUES(?,?,?,?,?,0,?)').bind(id, ns, name, 'bot-' + uid(), 'bot-' + uid() + uid(), now()).run();
+    await DB.prepare('INSERT OR REPLACE INTO brains(player_id,ns,cats,ready_words,net,ex,rounds,updated) VALUES(?,?,?,?,?,?,?,?)')
+      .bind(id, ns, JSON.stringify(bt.cats), bt.cats.length, botNet(bt.net), bt.ex, 1, now()).run();
+  }
+}
+function poolDrawing(word) {
+  const p = BOTS.pool[word]; if (!p) return null;
+  const s = atob(p.b), n = p.L.length, i = Math.floor(Math.random() * n);
+  let hex = ''; for (let q = 0; q < IN; q++) { const byte = s.charCodeAt(i * 98 + (q >> 3)); hex += (byte >> (7 - (q & 7))) & 1 ? 'f' : '0'; }
+  return { d: hex, L: p.L[i] };
+}
+// ציור ממה שלמדו מהשחקנים האמיתיים: ציורים ששמרו במוח שלהם או שזוהו באתגרים
+async function learnedDrawing(env, ns, word, ownerId) {
+  const DB = env.DB;
+  const a = await DB.prepare(`SELECT d FROM attempts WHERE ns=? AND word=? AND ok=1 AND d IS NOT NULL AND player_id NOT LIKE 'bot_%' AND owner_id<>? ORDER BY RANDOM() LIMIT 1`).bind(ns, word, ownerId).first();
+  const fromBrains = await DB.prepare(`SELECT cats,ex FROM brains WHERE ns=? AND player_id NOT LIKE 'bot_%' AND player_id<>? AND cats LIKE ? ORDER BY RANDOM() LIMIT 1`).bind(ns, ownerId, `%"w":"${word}"%`).first();
+  const opts = [];
+  if (a) opts.push({ d: a.d, L: 0 });
+  if (fromBrains) {
+    const k = JSON.parse(fromBrains.cats).findIndex(x => x.w === word);
+    const ex = (await unzipEx(fromBrains.ex)).filter(e => e[0] === k);
+    if (ex.length) { const e = ex[Math.floor(Math.random() * ex.length)]; opts.push({ d: e[1], L: e[2] || 0 }); }
+  }
+  return opts.length ? opts[Math.floor(Math.random() * opts.length)] : null;
+}
+async function botTick(env, ns, ctx, origin) {
+  const DB = env.DB;
+  await ensureBots(env, ns);
+  const log = [];
+  // 1. ניסיון אתגר
+  const { results: open } = await DB.prepare(`SELECT c.*,o.name owner FROM challenges c JOIN players o ON o.id=c.owner_id WHERE c.ns=? AND c.status='open' ORDER BY RANDOM() LIMIT 20`).bind(ns).all();
+  const humanFirst = open.sort((x, y) => (isBot(x.owner_id) ? 1 : 0) - (isBot(y.owner_id) ? 1 : 0) + (Math.random() - .5));
+  for (const c of humanFirst.slice(0, 3)) {
+    const { results: tried } = await DB.prepare('SELECT player_id FROM attempts WHERE challenge_id=?').bind(c.id).all();
+    const triedSet = new Set(tried.map(t => t.player_id));
+    const cand = BOTS.bots.map((_, i) => `bot_${ns}_${i}`).filter(id => id !== c.owner_id && !triedSet.has(id));
+    if (!cand.length) continue;
+    const id = cand[Math.floor(Math.random() * cand.length)];
+    const me = await DB.prepare('SELECT id,name FROM players WHERE id=?').bind(id).first(); if (!me) continue;
+    const dr = poolDrawing(c.word) || await learnedDrawing(env, ns, c.word, c.owner_id);
+    if (!dr) { log.push(`אין ציור ל"${c.word}"`); continue; }
+    const r = await runAttempt(env, ns, me, c, dr.d, dr.L, ctx, origin);
+    log.push(`${me.name} → "${c.word}" של ${c.owner}: ${r.error || (r.ok ? 'זוהה' : 'לא זוהה') + ' ' + (r.points ?? '')}`);
+    break;
+  }
+  // 2. פרסום אתגר
+  const tot = await DB.prepare(`SELECT COUNT(*) n FROM challenges WHERE ns=? AND status='open' AND owner_id LIKE 'bot_%'`).bind(ns).first();
+  if (tot.n < BOT_TOTAL_OPEN && Math.random() < 0.6) {
+    const i = Math.floor(Math.random() * BOTS.bots.length), id = `bot_${ns}_${i}`;
+    const mine = await DB.prepare(`SELECT word,status FROM challenges WHERE owner_id=? AND status<>'closed'`).bind(id).all();
+    const openN = mine.results.filter(x => x.status === 'open').length, used = new Set(mine.results.map(x => x.word));
+    const free = BOTS.bots[i].cats.map(x => x.w).filter(w => !used.has(w));
+    const seeded = await DB.prepare('SELECT 1 FROM brains WHERE player_id=?').bind(id).first();
+    if (seeded && openN < BOT_MAX_OPEN && free.length) {
+      const word = free[Math.floor(Math.random() * free.length)];
+      await DB.prepare('INSERT INTO challenges(id,ns,owner_id,word,lvl,status,tries,created) VALUES(?,?,?,?,?,\'open\',0,?)').bind(uid(), ns, id, word, LVL.get(word), now()).run();
+      log.push(`${BOTS.bots[i].name} פרסם "${word}"`);
+    }
+  }
+  return log;
+}
+
 /* ---------- ניתוב ---------- */
 export default {
+  async scheduled(event, env, ctx) {
+    const origin = 'https://tzayar-hamochot.contactarnon.workers.dev';
+    const base = MODE === 'ink' && !NS_PLAIN ? 'ink' : '';
+    try { await botTick(env, base + 'live', ctx, origin); } catch (e) { console.log('bots', e && e.message); }
+    try { const t = await env.DB.prepare(`SELECT 1 FROM players WHERE ns=? AND id NOT LIKE 'bot_%' LIMIT 1`).bind(base + 'test').first(); if (t) await botTick(env, base + 'test', ctx, origin); } catch (e) { }
+  },
   async fetch(req, env, ctx) {
     const url = new URL(req.url), p = url.pathname;
     try {

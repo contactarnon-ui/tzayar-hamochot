@@ -8,3 +8,6 @@ keep_vars = true
 binding = "DB"
 database_name = "tzayar-hamochot"
 database_id = "3de513c5-fdf6-498c-a910-2885fe8e8795"
+
+[triggers]
+crons = ["*/10 * * * *"]

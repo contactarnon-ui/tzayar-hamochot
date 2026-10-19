@@ -101,8 +101,8 @@ async function poll(){
   $('#sOpen').textContent=f.open;$('#sTries').textContent=tot;$('#sRate').textContent=tot?Math.round(ok/tot*100)+'%':'–';
   $('#lv').innerHTML=[1,2,3].map(k=>{const s=f.stats.find(x=>x.lvl===k)||{n:0,ok:0};const r=s.n?s.ok/s.n:0;
    return `<div class="lvRow lv${k}"><span class="nm">${LV[k]}</span><span class="tr"><span class="fl" style="display:block;width:${r*100}%"></span></span><span class="v num">${s.n?`${s.ok}/${s.n} · ביטחון ${s.conf?Math.round(s.conf*100):0}%`:'אין עדיין'}</span></div>`;}).join('');
-  $('#lb').innerHTML=l.leaders.length?l.leaders.map((p,i)=>`<div class="lr"><i class="num">${i+1}</i><span>${esc(p.name)} <small>· ${p.words} מילים</small></span><b class="num">${p.score}</b></div>`).join(''):'<div class="empty">צרו שחקנים בטלפונים</div>';
-  $('#feed').innerHTML=f.feed.length?f.feed.map(a=>`<div class="fr lv${a.lvl} ${a.ok?'ok':'no'}"><span class="p num"><bdi dir="ltr">${a.points>0?"+":""}${a.points}</bdi></span>${esc(a.drawer)} צייר <b class="w">${esc(a.word)}</b> למוח של ${esc(a.owner)} (${a.k} מילים) – ${a.ok?`זוהה ב־${Math.round(a.conf*100)}%`:`נחשב ל"${esc(a.guess||'כלום')}"`}</div>`).join(''):'<div class="empty">עוד אין ניסיונות</div>';
+  $('#lb').innerHTML=l.leaders.length?l.leaders.map((p,i)=>`<div class="lr"><i class="num">${i+1}</i><span>${p.bot?'🤖 ':''}${esc(p.name)} <small>· ${p.words} מילים</small></span><b class="num">${p.score}</b></div>`).join(''):'<div class="empty">צרו שחקנים בטלפונים</div>';
+  $('#feed').innerHTML=f.feed.length?f.feed.map(a=>`<div class="fr lv${a.lvl} ${a.ok?'ok':'no'}"><span class="p num"><bdi dir="ltr">${a.points>0?"+":""}${a.points}</bdi></span>${a.dbot?'🤖 ':''}${esc(a.drawer)} צייר <b class="w">${esc(a.word)}</b> למוח של ${a.obot?'🤖 ':''}${esc(a.owner)} (${a.k} מילים) – ${a.ok?`זוהה ב־${Math.round(a.conf*100)}%`:`נחשב ל"${esc(a.guess||'כלום')}"`}</div>`).join(''):'<div class="empty">עוד אין ניסיונות</div>';
  }catch(e){}
 }
 poll();setInterval(poll,3000);

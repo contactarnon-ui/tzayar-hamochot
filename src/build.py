@@ -4,7 +4,7 @@ rd=lambda f:open(T+f,encoding='utf8').read()
 w=rd('worker.js')
 for imp in ["import { WORDS } from './words.js';\n","import APP from './app.html';\n","import SIM from './sim.html';\n","import { ICONS } from './icons.js';\n"]:
     assert imp in w; w=w.replace(imp,'')
-w="// צייר המוחות – קובץ אחד להדבקה בעורך של Cloudflare\n"+rd('words.js').replace('export const','const')+rd('icons.js').replace('export const','const')+"const APP = "+json.dumps(rd('app.html'),ensure_ascii=False)+";\nconst SIM = "+json.dumps(rd('sim.html'),ensure_ascii=False)+";\n"+w.replace('export function','function')
+w="// צייר המוחות – קובץ אחד להדבקה בעורך של Cloudflare\n"+"const BOTS = "+open('/home/claude/qd/botdata.json',encoding='utf8').read()+";\n"+rd('words.js').replace('export const','const')+rd('icons.js').replace('export const','const')+"const APP = "+json.dumps(rd('app.html'),ensure_ascii=False)+";\nconst SIM = "+json.dumps(rd('sim.html'),ensure_ascii=False)+";\n"+w.replace('export function','function')
 open('/home/claude/worker-full.js','w',encoding='utf8').write(w)
 # solo
 W=json.dumps(json.loads(rd('words.js').split('WORDS = ',1)[1].strip().rstrip(';')),ensure_ascii=False)
@@ -24,5 +24,5 @@ print('built ink')
 # גרסת דיו על הכתובת הראשית – אותם שחקנים ומוחות (בלי קידומת ink)
 a="return MODE === 'ink' ? 'ink' + b : b;"
 assert a in wi
-open('/home/claude/worker-ink-main.js','w',encoding='utf8').write(wi.replace(a,"return b;"))
+open('/home/claude/worker-ink-main.js','w',encoding='utf8').write(wi.replace(a,"return b;").replace('const NS_PLAIN = false;','const NS_PLAIN = true;'))
 print('built ink-main')
