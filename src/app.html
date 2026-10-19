@@ -153,7 +153,15 @@ body.solo nav,body.solo #hScore,body.solo #hBell,body.solo #hMe,body.solo #wPub{
 /* בדיקה */
 .guess{min-height:40px;font-size:26px;font-weight:700;text-align:center;display:flex;align-items:center;justify-content:center;gap:8px}
 .guess small{font-size:15px;color:var(--ink2);font-weight:500}
-.bars{display:flex;flex-direction:column;gap:5px;min-height:126px}
+.bars{display:flex;flex-direction:column;gap:5px;min-height:94px}
+#vTest .topbar{position:relative}
+.ddBtn{flex:none;display:flex;align-items:center;gap:6px;height:42px;padding:0 10px 0 12px;border-radius:13px;background:var(--sheet);border:1.5px solid var(--line);font-weight:600;font-size:14.5px}
+.ddBtn b{background:var(--ink);color:#fff;border-radius:999px;padding:0 8px;font-size:13px;line-height:20px}
+.ddBtn .chev{width:16px;height:16px;transform:rotate(90deg);transition:transform .2s}
+.ddBtn[aria-expanded="true"] .chev{transform:rotate(-90deg)}
+.ddPanel{position:absolute;top:66px;left:16px;right:16px;z-index:6;max-height:52%;overflow-y:auto;background:var(--sheet);border:1.5px solid var(--line);border-radius:16px;box-shadow:var(--sh);padding:10px;display:flex;flex-wrap:wrap;gap:6px;align-content:flex-start}
+.ddPanel.hide{display:none}
+.ddPanel .mw{height:38px;font-size:15px;cursor:default}
 .bar{display:flex;align-items:center;gap:8px;height:28px;width:100%;text-align:right;font-size:15px}
 .bar .nm{width:92px;flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
 .bar .tr{flex:1;height:14px;border-radius:7px;background:var(--paper2);overflow:hidden}
@@ -385,8 +393,10 @@ bdi{unicode-bidi:isolate;direction:ltr}
   <section class="view" id="vTest">
    <div class="topbar">
     <button class="back" data-back aria-label="חזרה"><svg class="ic"><use href="#i-back"/></svg></button>
-    <div class="grow"><h1>בדיקת המוח</h1><div class="sub">ציירו מילה מהמוח – והוא ינחש</div></div>
+    <div class="grow"><h1>בדיקת המוח</h1><div class="sub">ציירו – והמוח ינחש</div></div>
+    <button class="ddBtn" id="tWordsBtn" aria-expanded="false"><span>המילים במוח</span><b class="num" id="tWordsN">0</b><svg class="ic chev"><use href="#i-back"/></svg></button>
    </div>
+   <div class="ddPanel hide" id="tWords"></div>
    <div class="padSlot" data-pad></div>
    <div class="guess" id="tGuess"></div>
    <div class="bars" id="tBars"></div>
@@ -862,7 +872,15 @@ $('#wPub').onclick=async()=>{
 
 /* ---------- בדיקה ---------- */
 let predT=0;
+function renderTestWords(){
+ const box=$('#tWords'),c=counts();box.innerHTML='';$('#tWordsN').textContent=S.cats.length;
+ if(!S.cats.length){box.innerHTML='<span class="emptyLine">עוד אין מילים במוח</span>';return;}
+ S.cats.map((x,i)=>({w:x.w,n:c[i]})).sort((a,b)=>a.w.localeCompare(b.w,'he')).forEach(o=>{const d=document.createElement('span');d.className='mw lv'+LVL.get(o.w);d.innerHTML='<span></span><small class="num"></small>';d.firstChild.textContent=o.w;d.lastChild.textContent=o.n+'/'+MAX_EX;box.appendChild(d);});
+}
+$('#tWordsBtn').onclick=e=>{e.stopPropagation();const p=$('#tWords'),open=p.classList.toggle('hide')===false;$('#tWordsBtn').setAttribute('aria-expanded',open);if(open)renderTestWords();};
+document.addEventListener('pointerdown',e=>{const p=$('#tWords');if(!p.classList.contains('hide')&&!p.contains(e.target)&&!$('#tWordsBtn').contains(e.target)){p.classList.add('hide');$('#tWordsBtn').setAttribute('aria-expanded',false);}});
 function renderTest(){
+ $('#tWords').classList.add('hide');$('#tWordsBtn').setAttribute('aria-expanded',false);$('#tWordsN').textContent=S.cats.length;
  $('#tGuess').innerHTML='';$('#tBars').innerHTML='';
  onStroke=(end)=>{const t=performance.now();if(!end&&t-predT<140)return;predT=t;predict();};
  if(!trainable()){$('#tGuess').innerHTML='<small>צריך לפחות 2 מילים במוח</small>';}
@@ -874,7 +892,7 @@ function predict(){
  const p=forward(toX(d)).p,k=argmax(p),bd=blur2(d),sim=simMax(bd,byCat()[k].map(e=>e.b||(e.b=blur2(e.d)))),pass=sim>=SIM_OK,conf=p[k]*simFactor(sim);
  g.innerHTML=`<small>${pass?'זה':'אולי…'}</small><span></span><small class="num">${Math.round(conf*100)}%</small><em class="simTag ${pass?'ok':'no'}">דמיון ${Math.round(sim*100)}% · ${pass?'יזוהה באתגר':'לא יזוהה באתגר'}</em>`;g.querySelector('span').textContent=S.cats[k].w;g.className='guess lv'+LVL.get(S.cats[k].w);g.querySelector('span').style.color='var(--lc)';
  bars.innerHTML='';
- [...p].map((v,i)=>[v,i]).sort((a,b)=>b[0]-a[0]).slice(0,4).forEach(([v,i])=>{
+ [...p].map((v,i)=>[v,i]).sort((a,b)=>b[0]-a[0]).slice(0,3).forEach(([v,i])=>{
   const w=S.cats[i].w,b=document.createElement('button');b.className='bar lv'+LVL.get(w);
   b.innerHTML=`<span class="nm"></span><span class="tr"><span class="fl" style="display:block;width:${(v*100).toFixed(1)}%"></span></span><span class="pc num">${Math.round(v*100)}%</span>`;
   b.querySelector('.nm').textContent=w;b.onclick=()=>teachFromTest(i);bars.appendChild(b);});
