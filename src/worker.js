@@ -389,7 +389,7 @@ async function runAttempt(env, ns, me, c, ds, Lin, ctx, origin, rec = null) {
       const topP = [...p2].map((v, i) => [v, i]).sort((a, b) => b[0] - a[0]).slice(0, 6).map(x => x[1]);
       sv = wordSims(d, exEvery.map(a => ({ c: a[0], d: strToD(a[1]) })), p2.length, [k, ...topP]); P = mixP(p2, sv);
     }
-    let g = 0; for (let i = 1; i < P.length; i++) if (P[i] > P[g]) g = i;
+    let g = 0; if (sv) g = bestWord(P, sv, SIM_LO, SIM_HI); else for (let i = 1; i < P.length; i++) if (P[i] > P[g]) g = i;
     sim = sv ? sv[k] : 1; prob = P[k];
     ok = g === k && sim >= SIM_OK; conf = prob * simFactor(sim); guess = g === k && !ok ? '' : cats[g].w;
   }

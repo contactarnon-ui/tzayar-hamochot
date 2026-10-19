@@ -42,3 +42,9 @@ function mixP(p, s) {
   for (let i = 0; i < K; i++) P[i] = 0.5 * p[i] + 0.5 * (sum ? q[i] / sum : 1 / K);
   return P;
 }
+// המילה שנבחרת = זו עם ציון ההתאמה הכי גבוה (ביטחון × דמיון); אם הכל 0 – לפי הביטחון בלבד
+function bestWord(P, s, lo, hi) {
+  let b = -1, bv = 0, a = 0;
+  for (let i = 0; i < P.length; i++) { const v = P[i] * Math.min(1, Math.max(0, (s[i] - lo) / (hi - lo))); if (v > bv) { bv = v; b = i; } if (P[i] > P[a]) a = i; }
+  return b >= 0 ? b : a;
+}
