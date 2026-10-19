@@ -25,7 +25,10 @@ const riskMult=n=>Math.round((3-(Math.min(MAX_EX,Math.max(1,n))-1)*2/9)*10)/10;
 const CM={mirror:1.5},cmul=c=>CM[c]||1;
 const scoreFor=(l,k,c,ok,n,cu)=>{const b=BASE[l]||10,m=riskMult(n)*cmul(cu);return ok?Math.max(1,Math.round(b*(1+sizeBonus(k))*m*c)):-Math.round(b/2*m);};
 const maxScore=(l,k,n,cu)=>Math.round((BASE[l]||10)*(1+sizeBonus(k))*riskMult(n)*cmul(cu));
-const CURSES=['line','three','mirror','white','time','straight','flip','rotate','shaky','dots','fade','tiny','fat'],SIM_OK=0.76,SIM_LO=0.62,SIM_HI=0.92,SIM_TF=[-45,-30,-15,0,15,30,45];
+const CURSES=['line','three','mirror','white','time','straight','flip','rotate','shaky','dots','fade','tiny','fat'],SIM_OK=0.8,SIM_LO=0.66,SIM_HI=0.95,SIM_TF=[-45,-30,-15,0,15,30,45];
+// אותו עובי קו לכולם: הופכים לשחור־לבן ומעבים ב־1 פיקסל, כך שמשווים רק צורה
+function thickN(d){const b=new Float32Array(IN);for(let y=0;y<N;y++)for(let x=0;x<N;x++){let on=0;for(let a=-1;a<=1&&!on;a++)for(let c=-1;c<=1;c++){const yy=y+a,xx=x+c;if(yy>=0&&yy<N&&xx>=0&&xx<N&&d[yy*N+xx]>=6){on=1;break;}}b[y*N+x]=on?15:0;}return b;}
+function prep(d){return blur2(thickN(d));}
 function blur2(d){let o=Float32Array.from(d);for(let pass=0;pass<2;pass++){const n=new Float32Array(IN);for(let y=0;y<N;y++)for(let x=0;x<N;x++){let s=0,c=0;for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const yy=y+a,xx=x+b;if(yy<0||yy>=N||xx<0||xx>=N)continue;s+=o[yy*N+xx];c++;}n[y*N+x]=s/c;}o=n;}return o;}
 // הטיה קלה בלבד: סיבוב בזווית (מעלות), בלי היפוכים
 function tf8(d,deg){if(!deg)return d;const o=new d.constructor(d.length),r=deg*Math.PI/180,c=Math.cos(r),s=Math.sin(r),m=(N-1)/2,isI=!(d instanceof Float32Array);for(let y=0;y<N;y++)for(let x=0;x<N;x++){const u=c*(x-m)+s*(y-m)+m,v=-s*(x-m)+c*(y-m)+m,x0=Math.floor(u),y0=Math.floor(v),fx=u-x0,fy=v-y0;let val=0;for(const [dx,dy,w] of [[0,0,(1-fx)*(1-fy)],[1,0,fx*(1-fy)],[0,1,(1-fx)*fy],[1,1,fx*fy]]){const xx=x0+dx,yy=y0+dy;if(xx>=0&&xx<N&&yy>=0&&yy<N)val+=d[yy*N+xx]*w;}o[y*N+x]=isI?Math.round(val):val;}return o;}
@@ -94,11 +97,11 @@ async function handle(method,url,headers,body){
   if(!br||!br.net||k<0)return E('המוח של בעל האתגר השתנה – האתגר נסגר');
   const ds=typeof body.d==='string'&&/^[0-9a-f]{784}$/.test(body.d)?body.d:null;let ok=false,conf=0,guess='',sim=0;
   const exK=(await unzipEx(br.ex)).filter(a=>a[0]===k).map(a=>hexD(a[1])),nEx=Math.max(1,exK.length||cats[k].n);
-  if(ds){const pr=forward(br.net,ds);let g=0;for(let i=1;i<pr.length;i++)if(pr[i]>pr[g])g=i;const bd=blur2(hexD(ds)),eb=exK.map(blur2);sim=1;if(eb.length){sim=0;for(const q of SIM_TF){const t=tf8(bd,q);for(const e of eb)sim=Math.max(sim,cosSim(t,e));}}ok=g===k&&sim>=SIM_OK;conf=pr[k]*Math.min(1,Math.max(0,(sim-SIM_LO)/(SIM_HI-SIM_LO)));guess=g===k&&!ok?'':cats[g].w;}
+  if(ds){const pr=forward(br.net,ds);let g=0;for(let i=1;i<pr.length;i++)if(pr[i]>pr[g])g=i;const bd=prep(hexD(ds)),eb=exK.map(prep);sim=1;if(eb.length){sim=0;for(const q of SIM_TF){const t=tf8(bd,q);for(const e of eb)sim=Math.max(sim,cosSim(t,e));}}ok=g===k&&sim>=SIM_OK;conf=pr[k]*Math.min(1,Math.max(0,(sim-SIM_LO)/(SIM_HI-SIM_LO)));guess=g===k&&!ok?'':cats[g].w;}
   const K=cats.filter(x=>x.n>=MIN_EX).length,pts=scoreFor(c.lvl,K,conf,ok,nEx,c.curse),owner=P(c.owner_id);
   c.tries++;if(ok)c.solved_by=me.id;
   db.attempts.push({id:uid(),challenge_id:c.id,player_id:me.id,owner_id:c.owner_id,word:c.word,lvl:c.lvl,ok:ok?1:0,conf,guess,points:pts,k:K,created:Date.now()});
-  me.score+=pts;if(ok)owner.score+=pts;
+  me.score=Math.max(0,me.score+pts);if(ok)owner.score+=pts;
   const pc=Math.round(conf*100),gain=ok?`קיבלת ${pts} נקודות`:`איבדת ${-pts} נקודות`;
   db.notes.push({id:uid(),player_id:owner.id,kind:ok?'win':'lose',text:ok?`${me.name} צייר "${c.word}" – המוח שלך זיהה ב־${pc}%. ${gain}`:guess?`${me.name} צייר "${c.word}" – המוח שלך חשב שזה "${guess}". לא הפסדת נקודות`:`${me.name} צייר "${c.word}" – לא דומה מספיק לציורים שלך. לא הפסדת נקודות`,points:ok?pts:0,seen:0,created:Date.now()});
   db.notes.push({id:uid(),player_id:me.id,kind:ok?'dwin':'dlose',text:ok?`המוח של ${owner.name} זיהה את "${c.word}" שלך ב־${pc}%. ${gain}`:`המוח של ${owner.name} לא זיהה את "${c.word}" שלך. ${gain}`,points:pts,seen:0,created:Date.now()});

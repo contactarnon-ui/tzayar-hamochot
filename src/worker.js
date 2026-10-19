@@ -25,15 +25,18 @@ export function scoreFor(lvl, k, conf, ok, n, curse, extra = 1) {
 function maxScore(lvl, k, n, curse) { return Math.round((BASE[lvl] || 10) * (1 + sizeBonus(k)) * riskMult(n) * curseMult(curse)); }
 const CURSES = ['line', 'three', 'mirror', 'white', 'time', 'straight', 'flip', 'rotate', 'shaky', 'dots', 'fade', 'tiny', 'fat'];
 /* דמיון: הציור מושווה לציורים שבעל המוח שמר למילה */
-const SIM_OK = 0.76, SIM_LO = 0.62, SIM_HI = 0.92;
+const SIM_OK = 0.8, SIM_LO = 0.66, SIM_HI = 0.95;
 const SIM_TF = [-45, -30, -15, 0, 15, 30, 45]; // הטיה עד 45° לכל כיוון, בלי היפוכים
+// אותו עובי קו לכולם: הופכים לשחור־לבן ומעבים ב־1 פיקסל, כך שמשווים רק צורה
+function thickN(d){const b=new Float32Array(IN);for(let y=0;y<N;y++)for(let x=0;x<N;x++){let on=0;for(let a=-1;a<=1&&!on;a++)for(let c=-1;c<=1;c++){const yy=y+a,xx=x+c;if(yy>=0&&yy<N&&xx>=0&&xx<N&&d[yy*N+xx]>=6){on=1;break;}}b[y*N+x]=on?15:0;}return b;}
+function prep(d){return blur2(thickN(d));}
 function blur2(d) { let o = Float32Array.from(d); for (let pass = 0; pass < 2; pass++) { const n = new Float32Array(IN); for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { let s = 0, c = 0; for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) { const yy = y + a, xx = x + b; if (yy < 0 || yy >= N || xx < 0 || xx >= N) continue; s += o[yy * N + xx]; c++; } n[y * N + x] = s / c; } o = n; } return o; }
 // מתאם (פירסון): משווה צורה, לא רק כמות דיו במרכז
 function cosSim(a,b){let ma=0,mb=0;const n=a.length;for(let i=0;i<n;i++){ma+=a[i];mb+=b[i];}ma/=n;mb/=n;let s=0,x=0,y=0;for(let i=0;i<n;i++){const u=a[i]-ma,v=b[i]-mb;s+=u*v;x+=u*u;y+=v*v;}return s/Math.sqrt(x*y+1e-9);}
 // היפוכים וסיבובים: 4 סיבובים × עם/בלי מראה
 // הטיה קלה בלבד: סיבוב בזווית (מעלות), בלי היפוכים
 function tf8(d,deg){if(!deg)return d;const o=new d.constructor(d.length),r=deg*Math.PI/180,c=Math.cos(r),s=Math.sin(r),m=(N-1)/2,isI=!(d instanceof Float32Array);for(let y=0;y<N;y++)for(let x=0;x<N;x++){const u=c*(x-m)+s*(y-m)+m,v=-s*(x-m)+c*(y-m)+m,x0=Math.floor(u),y0=Math.floor(v),fx=u-x0,fy=v-y0;let val=0;for(const [dx,dy,w] of [[0,0,(1-fx)*(1-fy)],[1,0,fx*(1-fy)],[0,1,(1-fx)*fy],[1,1,fx*fy]]){const xx=x0+dx,yy=y0+dy;if(xx>=0&&xx<N&&yy>=0&&yy<N)val+=d[yy*N+xx]*w;}o[y*N+x]=isI?Math.round(val):val;}return o;}
-function simTo(d, exs) { const bd = blur2(d), eb = exs.map(blur2); let m = 0; for (const k of SIM_TF) { const t = tf8(bd, k); for (const e of eb) m = Math.max(m, cosSim(t, e)); } return m; }
+function simTo(d, exs) { const bd = prep(d), eb = exs.map(prep); let m = 0; for (const k of SIM_TF) { const t = tf8(bd, k); for (const e of eb) m = Math.max(m, cosSim(t, e)); } return m; }
 const simFactor = s => Math.min(1, Math.max(0, (s - SIM_LO) / (SIM_HI - SIM_LO)));
 async function unzipEx(b) {
   if (!b) return [];
@@ -129,6 +132,8 @@ async function ensureRecs(DB) {
   await DB.prepare('CREATE INDEX IF NOT EXISTS recs_note ON recs(note_id)').run();
   // אפשר לנסות שוב אחרי כישלון – מבטלים את ההגבלה של ניסיון אחד
   await DB.prepare('DROP INDEX IF EXISTS att_once').run();
+  // ניקוד לא יורד מתחת ל־0
+  await DB.prepare('UPDATE players SET score=0 WHERE score<0').run();
   await DB.prepare('CREATE INDEX IF NOT EXISTS att_cp ON attempts(challenge_id, player_id)').run();
   recsReady = true;
 }
@@ -376,8 +381,8 @@ async function runAttempt(env, ns, me, c, ds, Lin, ctx, origin, rec = null) {
   await DB.batch([
     DB.prepare('INSERT INTO attempts(id,ns,challenge_id,player_id,owner_id,word,lvl,ok,conf,guess,points,k,d,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
       .bind(aid, ns, c.id, me.id, c.owner_id, c.word, c.lvl, ok ? 1 : 0, conf, guess, pts, K, ds, now()),
-    DB.prepare('UPDATE players SET score=score+? WHERE id=?').bind(pts, me.id),
-    DB.prepare('UPDATE players SET score=score+? WHERE id=?').bind(ownerPts, c.owner_id)]);
+    DB.prepare('UPDATE players SET score=MAX(0,score+?) WHERE id=?').bind(pts, me.id),
+    DB.prepare('UPDATE players SET score=MAX(0,score+?) WHERE id=?').bind(ownerPts, c.owner_id)]);
   const pc = Math.round(conf * 100);
   const gain = v => v > 0 ? `קיבלת ${v} נקודות` : v < 0 ? `איבדת ${-v} נקודות` : 'לא הפסדת נקודות';
   const who = isBot(me.id) ? `🤖 ${me.name}` : me.name;
