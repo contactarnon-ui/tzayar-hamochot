@@ -235,6 +235,23 @@ async function api(req, env, ctx, url) {
     const { results } = await DB.prepare('SELECT n.id,n.kind,n.text,n.points,n.seen,n.created,r.attempt_id aid FROM notes n LEFT JOIN recs r ON r.note_id=n.id WHERE n.player_id=? ORDER BY n.created DESC LIMIT 30').bind(me.id).all();
     return json({ notes: results });
   }
+  // ניהול: רק מנהל המשחק – מחיקת כל השחקנים שאינם רובוטים
+  if (p === '/api/admin/purge') {
+    if (me.name !== ADMIN_NAME || me.id.startsWith('bot_')) return err('אין הרשאה', 403);
+    const sel = `SELECT id FROM players WHERE ns=? AND id NOT LIKE 'bot_%' AND id<>?`;
+    const { results } = await DB.prepare(`SELECT name FROM players WHERE ns=? AND id NOT LIKE 'bot_%' AND id<>? ORDER BY name`).bind(ns, me.id).all();
+    if (m !== 'POST') return json({ names: results.map(r => r.name) });
+    await ensureRecs(DB);
+    await DB.batch([
+      DB.prepare(`DELETE FROM notes WHERE player_id IN (${sel})`).bind(ns, me.id),
+      DB.prepare(`DELETE FROM push_subs WHERE player_id IN (${sel})`).bind(ns, me.id),
+      DB.prepare(`DELETE FROM brains WHERE player_id IN (${sel})`).bind(ns, me.id),
+      DB.prepare(`DELETE FROM attempts WHERE player_id IN (${sel}) OR owner_id IN (${sel})`).bind(ns, me.id, ns, me.id),
+      DB.prepare(`DELETE FROM challenges WHERE owner_id IN (${sel})`).bind(ns, me.id),
+      DB.prepare(`DELETE FROM recs WHERE ns=? AND attempt_id NOT IN (SELECT id FROM attempts)`).bind(ns),
+      DB.prepare(`DELETE FROM players WHERE ns=? AND id NOT LIKE 'bot_%' AND id<>?`).bind(ns, me.id)]);
+    return json({ ok: true, deleted: results.length });
+  }
   // רשימת הניסיונות על אתגר שלי
   if (p === '/api/recs') {
     const cid = url.searchParams.get('c') || '';
@@ -398,6 +415,7 @@ async function runAttempt(env, ns, me, c, ds, Lin, ctx, origin, rec = null) {
 }
 
 /* ---------- שחקני מחשב ---------- */
+const ADMIN_NAME = 'ארנונש';
 const BOT_MAX_OPEN = 2, BOT_TOTAL_OPEN = 14;
 function b64f32(b) { return b64ToF32(b); }
 function f32b64(a) { const u = new Uint8Array(a.buffer, a.byteOffset, a.byteLength); let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); }

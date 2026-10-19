@@ -470,6 +470,7 @@ bdi{unicode-bidi:isolate;direction:ltr}
 <div class="sheet" id="shNotes"><div class="grab"></div><h3>התראות</h3><div class="nl" id="noteList"></div></div>
 <div class="sheet" id="shMe"><div class="grab"></div><h3 id="meName"></h3>
  <div class="codeBox"><span>הקוד האישי שלך</span><b class="num" id="meCode"></b><span>בעזרתו נכנסים מכל טלפון</span></div>
+ <button class="btn hide" id="purgeBtn" style="color:var(--bad);margin-bottom:8px">ניקוי שחקנים שאינם רובוטים</button>
  <button class="btn dark" id="pushBtn"><svg class="ic"><use href="#i-bell"/></svg>הפעלת התראות</button>
  <ul class="steps hide" id="iosSteps"><li>באייפון – התראות עובדות רק מהמסך הראשי:</li><li>1. לחצו על כפתור השיתוף בספארי</li><li>2. בחרו "הוספה למסך הבית"</li><li>3. פתחו את צייר המוחות מהאייקון החדש</li></ul>
  <button class="btn" id="logout">התנתקות</button>
@@ -1149,12 +1150,20 @@ const isIOS=/iPhone|iPad|iPod/.test(navigator.userAgent),standalone=matchMedia('
 $('#hMe').onclick=()=>{
  if(!ME)return;$('#meName').textContent=ME.name;$('#meCode').textContent=ME.code;
  const canPush='serviceWorker' in navigator&&'PushManager' in window&&!SIM&&!DEMO;
- $('#iosSteps').classList.toggle('hide',!(isIOS&&!standalone));
+ $('#iosSteps').classList.toggle('hide',!(isIOS&&!standalone));$('#purgeBtn').classList.toggle('hide',ME.name!=='ארנונש'||NS!=='live');
  const pb=$('#pushBtn');pb.classList.toggle('hide',!canPush);
  pb.disabled=typeof Notification!=='undefined'&&Notification.permission==='granted';pb.innerHTML=pb.disabled?'<svg class="ic"><use href="#i-check"/></svg>התראות פעילות':'<svg class="ic"><use href="#i-bell"/></svg>הפעלת התראות';
  openSheet('#shMe');
 };
 $('#pushBtn').onclick=()=>enablePush(true);
+// ניהול: מחיקת כל השחקנים חוץ ממנהל המשחק והרובוטים
+$('#purgeBtn').onclick=async()=>{
+ try{const {names}=await api('admin/purge');
+  if(!names.length){toast('אין שחקנים למחיקה');return;}
+  if(!await ask(`למחוק ${names.length} שחקנים?`,names.join(' · ')+' – כולל המוחות, האתגרים וההתראות שלהם. אי אפשר לשחזר.','מחיקה'))return;
+  const r=await api('admin/purge',{method:'POST'});toast(`נמחקו ${r.deleted} שחקנים`);closeSheets();
+ }catch(e){toast(e.message);}
+};
 $('#logout').onclick=async()=>{closeSheets();if(await ask('להתנתק?','אפשר לחזור עם השם והקוד.','התנתקות'))logout(false);};
 function logout(expired){AUTH=null;ls.del('auth');ls.del('brain');S={cats:[],ex:[],rounds:0,updated:0};newNet();closeSheets();showLogin();if(expired)toast('צריך להתחבר מחדש');}
 function b64u2u(s){s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';const b=atob(s),u=new Uint8Array(b.length);for(let i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}
