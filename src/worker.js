@@ -460,8 +460,12 @@ async function ensureBots(env, ns) {
 }
 function poolDrawing(word) {
   const p = BOTS.pool[word]; if (!p) return null;
-  const s = atob(p.b), n = p.L.length, i = Math.floor(Math.random() * n);
-  let hex = ''; for (let q = 0; q < IN; q++) { const byte = s.charCodeAt(i * 98 + (q >> 3)); hex += (byte >> (7 - (q & 7))) & 1 ? 'f' : '0'; }
+  const n = p.L.length, i = Math.floor(Math.random() * n);
+  let hex = '';
+  if (p.b2) { // 2 ביט לנקודה (קו נקי ומוחלק)
+    const s = atob(p.b2);
+    for (let q = 0; q < IN; q++) { const bit = (i * IN + q) * 2, byte = s.charCodeAt(bit >> 3), v = (byte >> (6 - (bit & 7))) & 3; hex += '05af'[v]; }
+  } else { const s = atob(p.b); for (let q = 0; q < IN; q++) { const byte = s.charCodeAt(i * 98 + (q >> 3)); hex += (byte >> (7 - (q & 7))) & 1 ? 'f' : '0'; } }
   return { d: hex, L: p.L[i] };
 }
 // ציור ממה שלמדו מהשחקנים האמיתיים: ציורים ששמרו במוח שלהם או שזוהו באתגרים
