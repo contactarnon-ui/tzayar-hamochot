@@ -479,6 +479,7 @@ bdi{unicode-bidi:isolate;direction:ltr}
 <div class="sheet tall" id="shPick"><div class="grab"></div><h3>מה ציירת?</h3><div class="search"><label><svg class="ic"><use href="#i-search"/></svg><input id="pickQ" placeholder="חיפוש בכל 300 המילים" enterkeyhint="search"></label></div><div class="list" id="pickGrid"></div></div>
 <div class="sheet" id="shRec"><div class="grab"></div><h3 id="recT"></h3><canvas id="recC" width="280" height="280"></canvas><div class="recRes" id="recRes"></div><div class="row"><button class="btn grow" id="recAgain">שוב</button><button class="btn pri grow" id="recClose">סגירה</button></div></div>
 <div class="sheet tall" id="shRecs"><div class="grab"></div><h3 id="recsT">מי צייר</h3><div class="list" id="recsList"></div></div>
+<div class="sheet" id="shEx"><div class="grab"></div><h3 id="exT"></h3><canvas id="exC" width="280" height="280" style="display:block;width:min(280px,72vw);height:auto;aspect-ratio:1;margin:6px auto 8px;background:#fff;border-radius:16px;box-shadow:var(--sh)"></canvas><p id="exP" style="text-align:center;color:var(--ink2);font-size:15px;min-height:22px;margin-bottom:10px"></p><div class="row"><button class="btn" id="exPrev" aria-label="הקודם"><svg class="ic"><use href="#i-back"/></svg></button><button class="btn grow" id="exDel" style="color:var(--bad)">מחיקה</button><button class="btn pri grow" id="exClose">סגירה</button><button class="btn" id="exNext" aria-label="הבא"><svg class="ic" style="transform:scaleX(-1)"><use href="#i-back"/></svg></button></div></div>
 <div class="sheet" id="shAdd"><div class="grab"></div><h3>מילה משלי</h3><p style="color:var(--ink2);font-size:15px;margin-bottom:10px">מילה אחת בעברית שלא נמצאת במאגר. ניקוד כמו מילה פשוטה.</p><div class="search"><label><svg class="ic"><use href="#i-pen"/></svg><input id="addQ" placeholder="למשל: אגרטל" maxlength="14" enterkeyhint="done" autocomplete="off"></label></div><div class="addErr" id="addErr"></div><div class="row"><button class="btn grow" id="addNo">ביטול</button><button class="btn pri grow" id="addYes">הוספה</button></div></div>
 <div class="sheet tall" id="shMine"><div class="grab"></div><h3 id="mineTitle">המילים שלי</h3><div class="search"><label><svg class="ic"><use href="#i-search"/></svg><input id="mineQ" placeholder="חיפוש במילים שלי"></label></div><div class="list" id="mineList"></div></div>
 <div id="toast"></div>
@@ -893,7 +894,7 @@ function renderWord(){
 function renderSlots(){
  const k=catIndex(cur.word),exs=k>=0?byCat()[k]:[],box=$('#slots');box.innerHTML='';
  for(let i=0;i<MAX_EX;i++){const b=document.createElement('button');const e=exs[i];
-  if(e){b.className='f';b.appendChild(thumb(e.d));b.setAttribute('aria-label','מחיקת ציור '+(i+1));b.onclick=()=>delExample(e);}
+  if(e){b.className='f';b.appendChild(thumb(e.d));b.setAttribute('aria-label','הגדלת ציור '+(i+1));b.onclick=()=>openEx(exs,i);}
   else{b.className=i<MIN_EX?'min':'';b.setAttribute('aria-label','מקום פנוי');b.disabled=true;}
   box.appendChild(b);}
  $('#wDel').classList.toggle('hide',k<0);
@@ -915,6 +916,20 @@ $('#wSave').onclick=()=>{
  S.ex.push({c:k,d,L:lastL});learnFx(d);clearPad();renderWord();dirty();kickTrain();
  const n=byCat()[k].length;if(n===1&&readyWords()===MIN_WORDS&&!SOLO)setTimeout(()=>toast('5 מילים במוח! עכשיו אפשר לפרסם אתגרים'),1800);
 };
+/* הגדלת ציור שמור */
+function bigDraw(cv,d){const x=cv.getContext('2d'),off=document.createElement('canvas');off.width=off.height=28;const ox=off.getContext('2d'),im=ox.createImageData(28,28);
+ for(let q=0;q<IN;q++){const t=d[q]/15;im.data[q*4]=Math.round(255-t*(255-0x1F));im.data[q*4+1]=Math.round(255-t*(255-0x24));im.data[q*4+2]=Math.round(255-t*(255-0x40));im.data[q*4+3]=255;}
+ ox.putImageData(im,0,0);x.fillStyle='#fff';x.fillRect(0,0,280,280);x.imageSmoothingEnabled=true;x.imageSmoothingQuality='high';x.filter='blur(1.2px) contrast(1.4)';x.drawImage(off,0,0,280,280);x.filter='none';}
+let exView=null;
+function openEx(list,i){exView={list,i};paintEx();openSheet('#shEx');}
+function paintEx(){const {list,i}=exView,e=list[i];if(!e){closeSheets();return;}
+ $('#exT').textContent=`"${S.cats[e.c].w}" · ציור ${i+1} מתוך ${list.length}`;bigDraw($('#exC'),e.d);
+ let t='';if(net&&trainable()){const p=forward(toX(e.d)).p,k=argmax(p);t=k===e.c?`המוח מזהה את הציור הזה ב־${Math.round(p[k]*100)}%`:`המוח חושב שזה "${S.cats[k].w}" (${Math.round(p[k]*100)}%)`;}
+ $('#exP').textContent=t;$('#exPrev').disabled=i<=0;$('#exNext').disabled=i>=list.length-1;}
+$('#exPrev').onclick=()=>{if(exView.i>0){exView.i--;paintEx();}};
+$('#exNext').onclick=()=>{if(exView.i<exView.list.length-1){exView.i++;paintEx();}};
+$('#exClose').onclick=closeSheets;
+$('#exDel').onclick=async()=>{const e=exView.list[exView.i];closeSheets();await delExample(e);};
 async function delExample(e){
  const k=e.c,n=byCat()[k].length;
  const warn=n===MIN_EX&&myOpen.has(S.cats[k].w)?'זה הציור האחרון של המילה – היא תימחק מהמוח והאתגר שלה ייסגר.':'';
