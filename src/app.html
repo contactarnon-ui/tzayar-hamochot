@@ -27,7 +27,7 @@
 :root{
  --paper:#FBF6EC;--paper2:#F2E9D8;--sheet:#FFFDF8;--ink:#1F2440;--ink2:#565A78;--ink3:#8A8DA6;--line:#E3D7C0;
  --accent:#E2461F;--accentD:#C23A17;--accentBg:#FDE3D9;
- --l1:#1A8E58;--l1bg:#DCF2E5;--l2:#B87400;--l2bg:#FBEBC8;--l3:#6343D6;--l3bg:#E8E2FB;
+ --l1:#1A8E58;--l1bg:#DCF2E5;--l2:#B87400;--l2bg:#FBEBC8;--l3:#6343D6;--l3bg:#E8E2FB;--l4:#1D6FA5;--l4bg:#DDEDF8;
  --ok:#1A8E58;--okBg:#DCF2E5;--bad:#CF3338;--badBg:#FBE0DF;
  --r:18px;--rs:12px;--sh:0 6px 18px -8px rgba(31,36,64,.28),0 2px 4px -2px rgba(31,36,64,.12);
  --safeB:env(safe-area-inset-bottom,0px);--safeT:env(safe-area-inset-top,0px);
@@ -82,7 +82,11 @@ body.solo nav,body.solo #hScore,body.solo #hBell,body.solo #hMe,body.solo #wPub{
 .grow{flex:1;min-width:0}
 
 /* מילים ורמות */
-.lv1{--lc:var(--l1);--lb:var(--l1bg)}.lv2{--lc:var(--l2);--lb:var(--l2bg)}.lv3{--lc:var(--l3);--lb:var(--l3bg)}
+.lv1{--lc:var(--l1);--lb:var(--l1bg)}.lv2{--lc:var(--l2);--lb:var(--l2bg)}.lv3{--lc:var(--l3);--lb:var(--l3bg)}.lv4{--lc:var(--l4);--lb:var(--l4bg)}
+.addErr{min-height:22px;color:var(--bad);font-size:15px;font-weight:600}
+.addBtn{margin:8px 14px;height:52px;border-radius:14px;border:2px dashed var(--l4);background:var(--l4bg);color:var(--l4);font-weight:700;font-size:17px;display:flex;align-items:center;justify-content:center;gap:8px}
+.addBtn .ic{width:22px;height:22px;flex:none}.addBtn span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.empty .addBtn{padding:0 18px}
 .tag{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 10px;border-radius:999px;background:var(--lb);color:var(--lc);font-size:13.5px;font-weight:600;white-space:nowrap}
 .tag::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--lc)}
 
@@ -363,6 +367,7 @@ bdi{unicode-bidi:isolate;direction:ltr}
    <div class="search">
     <label><svg class="ic"><use href="#i-search"/></svg><input id="q" placeholder="חיפוש מילה במאגר" enterkeyhint="search"></label>
     <button class="tool" id="rnd" aria-label="מילה אקראית"><svg class="ic"><use href="#i-dice"/></svg></button>
+    <button class="tool" id="addW" aria-label="הוספת מילה משלי" style="color:var(--l4);border-color:var(--l4)"><svg class="ic"><use href="#i-plus"/></svg></button>
    </div>
    <div class="list" id="wordList"></div>
   </section>
@@ -456,6 +461,7 @@ bdi{unicode-bidi:isolate;direction:ltr}
 </div>
 <div class="sheet" id="shAsk"><div class="grab"></div><h3 id="askT"></h3><p id="askP" style="color:var(--ink2);font-size:16px"></p><div class="row"><button class="btn grow" id="askNo">ביטול</button><button class="btn pri grow" id="askYes">אישור</button></div></div>
 <div class="sheet tall" id="shPick"><div class="grab"></div><h3>מה ציירת?</h3><div class="search"><label><svg class="ic"><use href="#i-search"/></svg><input id="pickQ" placeholder="חיפוש בכל 300 המילים" enterkeyhint="search"></label></div><div class="list" id="pickGrid"></div></div>
+<div class="sheet" id="shAdd"><div class="grab"></div><h3>מילה משלי</h3><p style="color:var(--ink2);font-size:15px;margin-bottom:10px">מילה אחת בעברית שלא נמצאת במאגר. ניקוד כמו מילה פשוטה.</p><div class="search"><label><svg class="ic"><use href="#i-pen"/></svg><input id="addQ" placeholder="למשל: אגרטל" maxlength="14" enterkeyhint="done" autocomplete="off"></label></div><div class="addErr" id="addErr"></div><div class="row"><button class="btn grow" id="addNo">ביטול</button><button class="btn pri grow" id="addYes">הוספה</button></div></div>
 <div class="sheet tall" id="shMine"><div class="grab"></div><h3 id="mineTitle">המילים שלי</h3><div class="search"><label><svg class="ic"><use href="#i-search"/></svg><input id="mineQ" placeholder="חיפוש במילים שלי"></label></div><div class="list" id="mineList"></div></div>
 <div id="toast"></div>
 <div id="desk"><div><svg viewBox="0 0 64 64"><use href="#mascotBig"/></svg><h1>צייר המוחות</h1><p>המשחק בנוי לטלפון.<br>פתחו את הכתובת הזאת בנייד:</p><p class="num" style="font-weight:600;color:var(--ink);direction:ltr">__ORIGIN__</p></div></div>
@@ -475,6 +481,21 @@ bdi{unicode-bidi:isolate;direction:ltr}
 <script>
 'use strict';
 const WORDS=/*__WORDS__*/null;
+const WFILTER=/*__FILTER__*/null;
+function wordProblem(w, F = WFILTER) {
+  w = String(w || '').trim();
+  if (!w) return 'כתבו מילה';
+  if (/\s/.test(w)) return 'רק מילה אחת, בלי רווחים';
+  if (!/^[\u05D0-\u05EA'"׳״-]+$/.test(w)) return 'רק אותיות בעברית';
+  const L = w.replace(/['"׳״-]/g, '').length;
+  if (L < 2) return 'מילה קצרה מדי';
+  if (L > 12) return 'מילה ארוכה מדי';
+  const norm = s => s.replace(/['"׳״-]/g, '').replace(/[ךםןףץ]/g, c => 'כמנפצ'['ךםןףץ'.indexOf(c)]).replace(/(.)\1+/g, '$1');
+  const bad = new Set(F.bad.map(norm)), sub = F.sub.map(norm), n = norm(w), forms = [n];
+  for (let i = 1; i <= 3 && i < n.length - 1; i++) { if (!'הובכלש'.includes(n[i - 1])) break; forms.push(n.slice(i)); }
+  if (forms.some(f => bad.has(f)) || sub.some(s => n.includes(s))) return 'המילה הזאת לא מתאימה למשחק';
+  return '';
+}
 const MODE=/*__MODE__*/'curse';
 const SEND_LABEL=MODE==='ink'?'אתגר את המוח':'שלח למוח';
 const INK_MAX=10;
@@ -490,9 +511,11 @@ const HM=location.hash.match(/^#sim-(\d+)$/);
 const NS=HM||QS.get('ns')==='test'?'test':'live',SLOT=HM?HM[1]:(QS.get('slot')||'0'),SIM=!!HM||QS.get('sim')==='1',DEMO=!!window.__DEMO,SOLO=!!window.__SOLO;
 const KEY=`tz_${NS}_${SLOT}_`;
 const N=28,IN=N*N,H=64,LR=0.015,MIN_EX=1,MAX_EX=10,MIN_WORDS=5;
-const BASE={1:10,2:20,3:30},LVNAME={1:'פשוטה',2:'בינונית',3:'מורכבת'};
+const BASE={1:10,2:20,3:30,4:10},LVNAME={1:'פשוטה',2:'בינונית',3:'מורכבת',4:'חופשית'};
 for(const k of [1,2,3])WORDS[k]=WORDS[k].slice().sort((a,b)=>a.localeCompare(b,'he'));
-const LVL=new Map();for(const k of [1,2,3])for(const w of WORDS[k])LVL.set(w,k);
+const LVL0=new Map();for(const k of [1,2,3])for(const w of WORDS[k])LVL0.set(w,k);
+// מילה שלא מהמאגר = מילה חופשית (רמה 4, ניקוד כמו פשוטה)
+const LVL={get:w=>LVL0.get(w)||4,has:w=>LVL0.has(w)};
 
 /* ---------- אחסון ---------- */
 const ls={get(k,d){try{const v=localStorage.getItem(KEY+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem(KEY+k,JSON.stringify(v));}catch(e){}},del(k){try{localStorage.removeItem(KEY+k);}catch(e){}}};
@@ -802,8 +825,10 @@ function renderMine(){
 }
 function renderList(){
  const q=$('#q').value.trim(),box=$('#wordList'),c=counts();box.innerHTML='';
- let items=q?[1,2,3].flatMap(l=>WORDS[l].filter(w=>w.includes(q)).map(w=>[w,l])):WORDS[cur.lvl].map(w=>[w,cur.lvl]);
- if(!items.length){box.innerHTML='<div class="empty"><b>המילה לא במאגר</b><span>אפשר לבחור רק מילים מתוך 300 המילים של המשחק</span></div>';return;}
+ let items=q?[1,2,3].flatMap(l=>WORDS[l].filter(w=>w.includes(q)).map(w=>[w,l])).concat(S.cats.filter(x=>!LVL.has(x.w)&&x.w.includes(q)).map(x=>[x.w,4])):WORDS[cur.lvl].map(w=>[w,cur.lvl]);
+ if(q&&!items.some(i=>i[0]===q)){const a=document.createElement('button');a.className='addBtn';a.innerHTML='<svg class="ic"><use href="#i-plus"/></svg><span></span>';a.lastChild.textContent=`הוסף "${q}" כמילה משלי`;a.onclick=()=>addFree(q);
+  if(!items.length){box.innerHTML='<div class="empty"><b>המילה לא במאגר</b><span>אפשר להוסיף אותה כמילה משלי</span></div>';box.firstChild.appendChild(a);return;}
+  box.appendChild(a);}
  if(q)items.sort((a,b)=>a[0].localeCompare(b[0],'he'));
  const frag=document.createDocumentFragment();let letter='';
  items.forEach(([w,l])=>{if(!q&&w[0]!==letter){letter=w[0];const h=document.createElement('div');h.className='letterHd';h.textContent=letter;frag.appendChild(h);}
@@ -817,6 +842,18 @@ $$('#lvSeg button').forEach(b=>b.onclick=()=>{cur.lvl=+b.dataset.l;$('#q').value
 $('#q').addEventListener('input',renderList);
 $('#rnd').onclick=()=>{const pool=WORDS[cur.lvl].filter(w=>catIndex(w)<0);const list=pool.length?pool:WORDS[cur.lvl];openWord(list[(Math.random()*list.length)|0]);};
 $('#rTest').onclick=()=>go('vTest');
+function addFree(w){
+ w=String(w||'').trim();const e=wordProblem(w);
+ if(e){$('#addQ').value=w;$('#addErr').textContent=e;if(!$('#shAdd').classList.contains('on'))openSheet('#shAdd');return;}
+ closeSheets();$('#q').value='';
+ if(LVL.has(w)){toast('המילה כבר במאגר');openWord(w);return;}
+ openWord(w);
+}
+$('#addW').onclick=()=>{$('#addQ').value=$('#q').value.trim();$('#addErr').textContent='';openSheet('#shAdd');setTimeout(()=>$('#addQ').focus(),250);};
+$('#addQ').addEventListener('input',()=>{$('#addErr').textContent='';});
+$('#addQ').addEventListener('keydown',e=>{if(e.key==='Enter')addFree($('#addQ').value);});
+$('#addYes').onclick=()=>addFree($('#addQ').value);
+$('#addNo').onclick=closeSheets;
 
 /* ---------- אימון מילה ---------- */
 function openWord(w){cur.word=w;go('vWord');}
@@ -905,7 +942,7 @@ $('#pickQ').addEventListener('input',renderPick);
 function renderPick(){
  const q=$('#pickQ').value.trim(),c=counts(),box=$('#pickGrid');box.innerHTML='';
  let items;
- if(q)items=[1,2,3].flatMap(l=>WORDS[l].filter(w=>w.includes(q)).map(w=>[w,l]));
+ if(q)items=[1,2,3].flatMap(l=>WORDS[l].filter(w=>w.includes(q)).map(w=>[w,l])).concat(S.cats.filter(x=>!LVL.has(x.w)&&x.w.includes(q)).map(x=>[x.w,4]));
  else items=S.cats.map(x=>[x.w,LVL.get(x.w)]).sort((a,b)=>a[0].localeCompare(b[0],'he'));
  if(!q&&items.length){const h=document.createElement('div');h.className='letterHd';h.textContent='המילים שבמוח · או חפשו מילה חדשה';box.appendChild(h);}
  if(!items.length){box.innerHTML='<div class="empty"><b>המילה לא במאגר</b><span>אפשר לבחור רק מתוך 300 המילים של המשחק</span></div>';return;}

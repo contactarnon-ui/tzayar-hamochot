@@ -1,14 +1,16 @@
 // צייר המוחות – Cloudflare Worker (D1 + Web Push)
-import { WORDS } from './words.js';
+import { WORDS, WFILTER, wordProblem } from './words.js';
 import APP from './app.html';
 import SIM from './sim.html';
 import { ICONS } from './icons.js';
 
 const N = 28, IN = N * N;
 const MIN_EX = 1, MAX_EX = 10, MIN_WORDS = 5;
-const BASE = { 1: 10, 2: 20, 3: 30 };
+const BASE = { 1: 10, 2: 20, 3: 30, 4: 10 };
 const LVL = new Map();
 for (const k of ['1', '2', '3']) for (const w of WORDS[k]) LVL.set(w, +k);
+// מילה חופשית (לא מהמאגר, עברה סינון) = רמה 4, ניקוד כמו פשוטה
+const lvlOf = w => LVL.get(w) || (wordProblem(w) ? 0 : 4);
 
 /* ---------- ניקוד ---------- */
 export function sizeBonus(k) { return Math.min(2, Math.max(0, (k - MIN_WORDS) * 0.05)); }
@@ -228,8 +230,8 @@ async function api(req, env, ctx, url) {
   if (p === '/api/brain' && m === 'PUT') {
     const b = await body(req);
     if (!Array.isArray(b.cats)) return err('מוח לא תקין');
-    const cats = b.cats.filter(c => LVL.has(c.w)).map(c => ({ w: c.w, n: Math.min(MAX_EX, Math.max(0, c.n | 0)) }));
-    if (cats.length !== b.cats.length) return err('יש מילה שלא מהמאגר');
+    const cats = b.cats.filter(c => lvlOf(c.w)).map(c => ({ w: c.w, n: Math.min(MAX_EX, Math.max(0, c.n | 0)) }));
+    if (cats.length !== b.cats.length) return err('יש במוח מילה שלא מתאימה למשחק');
     if (b.net) { const o = JSON.parse(b.net); if (!o.W2 || o.W2.length !== cats.length) return err('הרשת לא תואמת למילים'); }
     const ready = cats.filter(c => c.n >= MIN_EX).length;
     await DB.prepare(`INSERT INTO brains(player_id,ns,cats,ready_words,net,ex,rounds,updated) VALUES(?,?,?,?,?,?,?,?)
@@ -266,7 +268,7 @@ async function api(req, env, ctx, url) {
   }
   if (p === '/api/challenge' && m === 'POST') {
     const word = String((await body(req)).word || '');
-    const lvl = LVL.get(word); if (!lvl) return err('המילה לא במאגר');
+    const lvl = lvlOf(word); if (!lvl) return err('המילה לא מתאימה למשחק');
     const br = await DB.prepare('SELECT cats,ready_words,net FROM brains WHERE player_id=?').bind(me.id).first();
     if (!br || !br.net) return err('קודם צריך לאמן את המוח');
     const rw = JSON.parse(br.cats).filter(c => c.n >= MIN_EX).length;
@@ -440,7 +442,7 @@ export default {
     try {
       if (p.startsWith('/api/')) return await api(req, env, ctx, url);
       if (p === '/' || p === '/index.html')
-        return new Response(APP.replace('/*__WORDS__*/null', JSON.stringify(WORDS)).replace(/__ORIGIN__/g, url.origin), { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' } });
+        return new Response(APP.replace('/*__WORDS__*/null', JSON.stringify(WORDS)).replace('/*__FILTER__*/null', () => JSON.stringify(WFILTER)).replace(/__ORIGIN__/g, url.origin), { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' } });
       if (p === '/sim') return new Response(SIM, { headers: { 'content-type': 'text/html; charset=utf-8', 'x-robots-tag': 'noindex' } });
       if (p === '/sw.js') return new Response(SW, { headers: { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache' } });
       if (p === '/manifest.webmanifest') return new Response(manifest(), { headers: { 'content-type': 'application/manifest+json' } });

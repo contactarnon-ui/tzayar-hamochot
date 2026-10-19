@@ -2,8 +2,24 @@
 (function(){
 window.__DEMO=true;
 const WORDS=/*__WORDS__*/null;
-const N=28,IN=N*N,MIN_EX=1,MAX_EX=10,MIN_WORDS=5,BASE={1:10,2:20,3:30};
+const N=28,IN=N*N,MIN_EX=1,MAX_EX=10,MIN_WORDS=5,BASE={1:10,2:20,3:30,4:10};
 const LVL=new Map();for(const k of ['1','2','3'])for(const w of WORDS[k])LVL.set(w,+k);
+const WF_S=/*__FILTER__*/null;
+function wordProblemS(w, F = WF_S) {
+  w = String(w || '').trim();
+  if (!w) return 'כתבו מילה';
+  if (/\s/.test(w)) return 'רק מילה אחת, בלי רווחים';
+  if (!/^[\u05D0-\u05EA'"׳״-]+$/.test(w)) return 'רק אותיות בעברית';
+  const L = w.replace(/['"׳״-]/g, '').length;
+  if (L < 2) return 'מילה קצרה מדי';
+  if (L > 12) return 'מילה ארוכה מדי';
+  const norm = s => s.replace(/['"׳״-]/g, '').replace(/[ךםןףץ]/g, c => 'כמנפצ'['ךםןףץ'.indexOf(c)]).replace(/(.)\1+/g, '$1');
+  const bad = new Set(F.bad.map(norm)), sub = F.sub.map(norm), n = norm(w), forms = [n];
+  for (let i = 1; i <= 3 && i < n.length - 1; i++) { if (!'הובכלש'.includes(n[i - 1])) break; forms.push(n.slice(i)); }
+  if (forms.some(f => bad.has(f)) || sub.some(s => n.includes(s))) return 'המילה הזאת לא מתאימה למשחק';
+  return '';
+}
+const lvlOf=w=>LVL.get(w)||(wordProblemS(w)?0:4);
 const sizeBonus=k=>Math.min(2,Math.max(0,(k-MIN_WORDS)*0.05));
 const riskMult=n=>Math.round((3-(Math.min(MAX_EX,Math.max(1,n))-1)*2/9)*10)/10;
 const CM={mirror:1.5},cmul=c=>CM[c]||1;
@@ -50,7 +66,7 @@ async function handle(method,url,headers,body){
  if(p==='/api/push/sub')return R({ok:true});
  if(p==='/api/brain'&&method==='GET'){return R({brain:db.brains[me.id]||null});}
  if(p==='/api/brain'&&method==='PUT'){
-  const cats=(body.cats||[]).map(c=>({w:c.w,n:Math.min(MAX_EX,c.n|0)}));if(cats.some(c=>!LVL.has(c.w)))return E('יש מילה שלא מהמאגר');
+  const cats=(body.cats||[]).map(c=>({w:c.w,n:Math.min(MAX_EX,c.n|0)}));if(cats.some(c=>!lvlOf(c.w)))return E('יש במוח מילה שלא מתאימה למשחק');
   const ready=cats.filter(c=>c.n>=MIN_EX).length;
   db.brains[me.id]={cats:JSON.stringify(cats),ready_words:ready,net:body.net,ex:body.ex,rounds:body.rounds|0,updated:Date.now()};
   const okW=new Set(cats.filter(c=>c.n>=MIN_EX).map(c=>c.w));
@@ -60,7 +76,7 @@ async function handle(method,url,headers,body){
   .map(c=>{const br=db.brains[c.owner_id]||{},k=br.ready_words||0,n=((br.cats?JSON.parse(br.cats):[]).find(x=>x.w===c.word)||{n:1}).n;return {id:c.id,word:c.word,lvl:c.lvl,tries:c.tries,created:c.created,curse:c.curse,owner:(P(c.owner_id)||{}).name,k,n,mult:riskMult(n),cmult:cmul(c.curse),max:maxScore(c.lvl,k,n,c.curse)};})});}
  if(p==='/api/mine'){return R({challenges:db.challenges.filter(c=>c.owner_id===me.id&&c.status!=='closed').slice().reverse().map(c=>({...c,solver:c.solved_by?(P(c.solved_by)||{}).name:null}))});}
  if(p==='/api/challenge'&&method==='POST'){
-  const w=String(body.word||''),lvl=LVL.get(w);if(!lvl)return E('המילה לא במאגר');const br=db.brains[me.id];
+  const w=String(body.word||''),lvl=lvlOf(w);if(!lvl)return E('המילה לא מתאימה למשחק');const br=db.brains[me.id];
   if(!br||!br.net)return E('קודם צריך לאמן את המוח');if(br.ready_words<MIN_WORDS)return E(`צריך לפחות ${MIN_WORDS} מילים עם ${MIN_EX} ציורים כל אחת`);
   const c=JSON.parse(br.cats).find(c=>c.w===w);if(!c||c.n<MIN_EX)return E(`למילה צריך לפחות ${MIN_EX} ציורים`);
   if(db.challenges.some(c=>c.owner_id===me.id&&c.word===w&&c.status==='open'))return E('המילה הזאת כבר באתגר');
