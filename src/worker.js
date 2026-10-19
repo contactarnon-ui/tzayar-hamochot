@@ -389,9 +389,10 @@ async function runAttempt(env, ns, me, c, ds, Lin, ctx, origin, rec = null) {
       const topP = [...p2].map((v, i) => [v, i]).sort((a, b) => b[0] - a[0]).slice(0, 6).map(x => x[1]);
       sv = wordSims(d, exEvery.map(a => ({ c: a[0], d: strToD(a[1]) })), p2.length, [k, ...topP]); P = mixP(p2, sv);
     }
-    let g = 0; if (sv) g = bestWord(P, sv, SIM_LO, SIM_HI); else for (let i = 1; i < P.length; i++) if (P[i] > P[g]) g = i;
+    // הדמיון מחליט: המילה שהציור הכי דומה לציורים שלה
+    let g = 0; const V = sv || P; for (let i = 1; i < V.length; i++) if (V[i] > V[g]) g = i;
     sim = sv ? sv[k] : 1; prob = P[k];
-    ok = g === k && sim >= SIM_OK; conf = prob * simFactor(sim); guess = g === k && !ok ? '' : cats[g].w;
+    ok = g === k && sim >= SIM_OK; conf = sv ? simFactor(sim) : prob; guess = g === k && !ok ? '' : cats[g].w;
   }
   const K = cats.filter(x => x.n >= MIN_EX).length, pts = scoreFor(c.lvl, K, conf, ok, nEx, c.curse, im);
   // כישלון מוריד נקודות רק למי שמצייר; בעל המוח לא מפסיד

@@ -100,7 +100,7 @@ async function handle(method,url,headers,body){
   const exEvery=await unzipEx(br.ex),exK=exEvery.filter(a=>a[0]===k).map(a=>hexD(a[1])),nEx=Math.max(1,exK.length||cats[k].n);
   if(ds){const pr0=forward(br.net,ds),dd=hexD(ds);let pr=pr0,sv=null;
    if(exK.length){const topP=[...pr0].map((v,i)=>[v,i]).sort((a,b)=>b[0]-a[0]).slice(0,6).map(x=>x[1]);sv=wordSims(dd,exEvery.map(a=>({c:a[0],d:hexD(a[1])})),pr0.length,[k,...topP]);pr=mixP(pr0,sv);}
-   let g=0;if(sv)g=bestWord(pr,sv,SIM_LO,SIM_HI);else for(let i=1;i<pr.length;i++)if(pr[i]>pr[g])g=i;sim=sv?sv[k]:1;ok=g===k&&sim>=SIM_OK;conf=pr[k]*Math.min(1,Math.max(0,(sim-SIM_LO)/(SIM_HI-SIM_LO)));guess=g===k&&!ok?'':cats[g].w;}
+   const V=sv||pr;let g=0;for(let i=1;i<V.length;i++)if(V[i]>V[g])g=i;sim=sv?sv[k]:1;ok=g===k&&sim>=SIM_OK;conf=sv?Math.min(1,Math.max(0,(sim-SIM_LO)/(SIM_HI-SIM_LO))):pr[k];guess=g===k&&!ok?'':cats[g].w;}
   const K=cats.filter(x=>x.n>=MIN_EX).length,pts=scoreFor(c.lvl,K,conf,ok,nEx,c.curse),owner=P(c.owner_id);
   c.tries++;if(ok)c.solved_by=me.id;
   db.attempts.push({id:uid(),challenge_id:c.id,player_id:me.id,owner_id:c.owner_id,word:c.word,lvl:c.lvl,ok:ok?1:0,conf,guess,points:pts,k:K,created:Date.now()});
