@@ -544,12 +544,12 @@ async function api(path,opt={}){
 /* ---------- ניקוד ---------- */
 const sizeBonus=k=>Math.min(2,Math.max(0,(k-MIN_WORDS)*0.05));
 const riskMult=n=>Math.round((3-(Math.min(MAX_EX,Math.max(1,n))-1)*2/9)*10)/10;
-const SIM_OK=0.7,SIM_LO=0.55,SIM_HI=0.9;
+const SIM_OK=0.74,SIM_LO=0.6,SIM_HI=0.9,SIM_TF=[0,2,4,6];
 function blur2(d){let o=Float32Array.from(d);for(let pass=0;pass<2;pass++){const n=new Float32Array(IN);for(let y=0;y<N;y++)for(let x=0;x<N;x++){let s=0,c=0;for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const yy=y+a,xx=x+b;if(yy<0||yy>=N||xx<0||xx>=N)continue;s+=o[yy*N+xx];c++;}n[y*N+x]=s/c;}o=n;}return o;}
-function cosSim(a,b){let s=0,x=0,y=0;for(let i=0;i<a.length;i++){s+=a[i]*b[i];x+=a[i]*a[i];y+=b[i]*b[i];}return s/Math.sqrt(x*y+1e-9);}
+function cosSim(a,b){let ma=0,mb=0;const n=a.length;for(let i=0;i<n;i++){ma+=a[i];mb+=b[i];}ma/=n;mb/=n;let s=0,x=0,y=0;for(let i=0;i<n;i++){const u=a[i]-ma,v=b[i]-mb;s+=u*v;x+=u*u;y+=v*v;}return s/Math.sqrt(x*y+1e-9);}
 
 function tf8(d,k){if(!k)return d;const o=new d.constructor(d.length);for(let y=0;y<N;y++)for(let x=0;x<N;x++){let a=(k&4)?N-1-x:x,b=y;for(let r=0;r<(k&3);r++){const t=a;a=N-1-b;b=t;}o[b*N+a]=d[y*N+x];}return o;}
-function simMax(bd,exB){let m=0;for(let k=0;k<8;k++){const t=tf8(bd,k);for(const e of exB)m=Math.max(m,cosSim(t,e));}return m;}
+function simMax(bd,exB){let m=0;for(const k of SIM_TF){const t=tf8(bd,k);for(const e of exB)m=Math.max(m,cosSim(t,e));}return m;}
 const simFactor=s=>Math.min(1,Math.max(0,(s-SIM_LO)/(SIM_HI-SIM_LO)));
 const CURSE={line:{t:'קו אחד',d:'בלי להרים את האצבע'},three:{t:'3 קווים',d:'רק שלושה קווים'},mirror:{t:'מראה',d:'הקו יוצא הפוך מהאצבע'},white:{t:'מכחול לבן',d:'הקו לא נראה בזמן הציור'},time:{t:'5 שניות',d:'מהנגיעה הראשונה'}};
 CURSE.half=CURSE.white;
@@ -945,10 +945,9 @@ function predict(){
  const p=forward(toX(d)).p,k=argmax(p),bd=blur2(d),sim=simMax(bd,byCat()[k].map(e=>e.b||(e.b=blur2(e.d)))),pass=sim>=SIM_OK,conf=p[k]*simFactor(sim);
  g.innerHTML=`<small>${pass?'זה':'אולי…'}</small><span></span><small class="num">${Math.round(conf*100)}%</small><em class="simTag ${pass?'ok':'no'}">דמיון ${Math.round(sim*100)}% · ${pass?'יזוהה באתגר':'לא יזוהה באתגר'}</em>`;g.querySelector('span').textContent=S.cats[k].w;g.className='guess lv'+LVL.get(S.cats[k].w);g.querySelector('span').style.color='var(--lc)';
  bars.innerHTML='';
- // העמודות: אחוז ההתאמה האמיתי של הציור לציורים של כל מילה (לא חלוקה בין המילים)
- const T8=[0,1,2,3,4,5,6,7].map(t=>tf8(bd,t)),bc=byCat();
- const match=S.cats.map((_,i)=>{const ex=bc[i]||[];let m=0;for(const e of ex){const eb=e.b||(e.b=blur2(e.d));for(const t of T8)m=Math.max(m,cosSim(t,eb));}return simFactor(m);});
- match.map((v,i)=>[v,i]).sort((a,b)=>b[0]-a[0]).slice(0,3).forEach(([v,i])=>{
+ // העמודות: 3 המילים שהמוח הכי חושב שמתאימות; האחוז = הציון שקובע זיהוי באתגר (ביטחון × דמיון)
+ const bc=byCat();
+ [...p].map((v,i)=>[v,i]).sort((a,b)=>b[0]-a[0]).slice(0,3).map(([v,i])=>[i===k?conf:v*simFactor(simMax(bd,(bc[i]||[]).map(e=>e.b||(e.b=blur2(e.d))))),i]).forEach(([v,i])=>{
   const w=S.cats[i].w,b=document.createElement('button');b.className='bar lv'+LVL.get(w);
   b.innerHTML=`<span class="nm"></span><span class="tr"><span class="fl" style="display:block;width:${(v*100).toFixed(1)}%"></span></span><span class="pc num">${Math.round(v*100)}%</span>`;
   b.querySelector('.nm').textContent=w;b.onclick=()=>teachFromTest(i);bars.appendChild(b);});
@@ -1027,7 +1026,7 @@ function showResult(r,d){
  const box=$('#dRes'),pc=Math.round(r.conf*100);box.className='result '+(r.ok?'win':'lose');
  box.innerHTML=`<div class="badge"><svg class="ic"><use href="#i-${r.ok?'check':'x'}"/></svg></div><h2>${r.ok?'המוח זיהה!':'המוח לא זיהה'}</h2><p></p><canvas class="mini"></canvas><div class="pts num"><bdi>${r.points<0?'−'+(-r.points):r.points}</bdi><small>נקודות</small></div><div class="formula"></div>${r.ok?'':'<button class="btn pri" id="resAgain" style="margin-bottom:8px">נסה שוב</button>'}<button class="btn dark" id="resBack">חזרה לכיכר</button>`;
  const sp=Math.round((r.sim||0)*100);
- box.querySelector('p').textContent=r.empty?'לא צויר כלום':r.ok?`המוח של ${r.owner} זיהה "${r.word}" · דמיון ${sp}% לציורים שלו`:r.guess?`המוח של ${r.owner} חשב שזה "${r.guess}"`:`המוח ניחש "${r.word}", אבל הציור דומה רק ${sp}% לציורים של ${r.owner} (צריך 70%)`;
+ box.querySelector('p').textContent=r.empty?'לא צויר כלום':r.ok?`המוח של ${r.owner} זיהה "${r.word}" · דמיון ${sp}% לציורים שלו`:r.guess?`המוח של ${r.owner} חשב שזה "${r.guess}"`:`המוח ניחש "${r.word}", אבל הציור דומה רק ${sp}% לציורים של ${r.owner} (צריך 74%)`;
  box.querySelector('.formula').textContent=r.ok?`${pc}% × ${r.mult} (${r.n} ${r.n===1?'ציור':'ציורים'})${r.imult>1?` × ${r.imult} (דיו ${Math.round((r.inkR||1)*100)}%)`:''}${r.cmult>1?` × ${r.cmult} (מראה)`:''} × ${(1+sizeBonus(r.k)).toFixed(2)} (${r.k} מילים) × ${BASE[r.lvl]} · אותו ניקוד גם ל${r.owner}`:`איבדת ${-r.points} נקודות (מכפיל ${Math.round(r.mult*(r.cmult||1)*10)/10}) · ${r.owner} לא מפסיד · אפשר לנסות שוב`;
  const mini=box.querySelector('.mini');if(d)thumb(d,mini);else mini.remove();
  box.querySelector('#resBack').onclick=()=>{cur.stack=[];go('vSquare',false);};

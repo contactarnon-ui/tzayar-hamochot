@@ -25,10 +25,10 @@ const riskMult=n=>Math.round((3-(Math.min(MAX_EX,Math.max(1,n))-1)*2/9)*10)/10;
 const CM={mirror:1.5},cmul=c=>CM[c]||1;
 const scoreFor=(l,k,c,ok,n,cu)=>{const b=BASE[l]||10,m=riskMult(n)*cmul(cu);return ok?Math.max(1,Math.round(b*(1+sizeBonus(k))*m*c)):-Math.round(b/2*m);};
 const maxScore=(l,k,n,cu)=>Math.round((BASE[l]||10)*(1+sizeBonus(k))*riskMult(n)*cmul(cu));
-const CURSES=['line','three','mirror','white','time','straight','flip','rotate','shaky','dots','fade','tiny','fat'],SIM_OK=0.7,SIM_LO=0.55,SIM_HI=0.9;
+const CURSES=['line','three','mirror','white','time','straight','flip','rotate','shaky','dots','fade','tiny','fat'],SIM_OK=0.74,SIM_LO=0.6,SIM_HI=0.9,SIM_TF=[0,2,4,6];
 function blur2(d){let o=Float32Array.from(d);for(let pass=0;pass<2;pass++){const n=new Float32Array(IN);for(let y=0;y<N;y++)for(let x=0;x<N;x++){let s=0,c=0;for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const yy=y+a,xx=x+b;if(yy<0||yy>=N||xx<0||xx>=N)continue;s+=o[yy*N+xx];c++;}n[y*N+x]=s/c;}o=n;}return o;}
 function tf8(d,k){if(!k)return d;const o=new d.constructor(d.length);for(let y=0;y<N;y++)for(let x=0;x<N;x++){let a=(k&4)?N-1-x:x,b=y;for(let r=0;r<(k&3);r++){const t=a;a=N-1-b;b=t;}o[b*N+a]=d[y*N+x];}return o;}
-function cosSim(a,b){let s=0,x=0,y=0;for(let i=0;i<a.length;i++){s+=a[i]*b[i];x+=a[i]*a[i];y+=b[i]*b[i];}return s/Math.sqrt(x*y+1e-9);}
+function cosSim(a,b){let ma=0,mb=0;const n=a.length;for(let i=0;i<n;i++){ma+=a[i];mb+=b[i];}ma/=n;mb/=n;let s=0,x=0,y=0;for(let i=0;i<n;i++){const u=a[i]-ma,v=b[i]-mb;s+=u*v;x+=u*u;y+=v*v;}return s/Math.sqrt(x*y+1e-9);}
 const hexD=s=>{const d=new Uint8Array(IN);for(let i=0;i<IN;i++)d[i]=parseInt(s[i],16)||0;return d;};
 async function unzipEx(b){if(!b)return [];if(b[0]==='P')return JSON.parse(decodeURIComponent(escape(atob(b.slice(1)))));const s=atob(b.slice(1)),u=new Uint8Array(s.length);for(let i=0;i<s.length;i++)u[i]=s.charCodeAt(i);return JSON.parse(await new Response(new Blob([u]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text());}
 const uid=()=>(crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+Math.random().toString(36).slice(2));
@@ -93,7 +93,7 @@ async function handle(method,url,headers,body){
   if(!br||!br.net||k<0)return E('המוח של בעל האתגר השתנה – האתגר נסגר');
   const ds=typeof body.d==='string'&&/^[0-9a-f]{784}$/.test(body.d)?body.d:null;let ok=false,conf=0,guess='',sim=0;
   const exK=(await unzipEx(br.ex)).filter(a=>a[0]===k).map(a=>hexD(a[1])),nEx=Math.max(1,exK.length||cats[k].n);
-  if(ds){const pr=forward(br.net,ds);let g=0;for(let i=1;i<pr.length;i++)if(pr[i]>pr[g])g=i;const bd=blur2(hexD(ds)),eb=exK.map(blur2);sim=1;if(eb.length){sim=0;for(let q=0;q<8;q++){const t=tf8(bd,q);for(const e of eb)sim=Math.max(sim,cosSim(t,e));}}ok=g===k&&sim>=SIM_OK;conf=pr[k]*Math.min(1,Math.max(0,(sim-SIM_LO)/(SIM_HI-SIM_LO)));guess=g===k&&!ok?'':cats[g].w;}
+  if(ds){const pr=forward(br.net,ds);let g=0;for(let i=1;i<pr.length;i++)if(pr[i]>pr[g])g=i;const bd=blur2(hexD(ds)),eb=exK.map(blur2);sim=1;if(eb.length){sim=0;for(const q of SIM_TF){const t=tf8(bd,q);for(const e of eb)sim=Math.max(sim,cosSim(t,e));}}ok=g===k&&sim>=SIM_OK;conf=pr[k]*Math.min(1,Math.max(0,(sim-SIM_LO)/(SIM_HI-SIM_LO)));guess=g===k&&!ok?'':cats[g].w;}
   const K=cats.filter(x=>x.n>=MIN_EX).length,pts=scoreFor(c.lvl,K,conf,ok,nEx,c.curse),owner=P(c.owner_id);
   c.tries++;if(ok)c.solved_by=me.id;
   db.attempts.push({id:uid(),challenge_id:c.id,player_id:me.id,owner_id:c.owner_id,word:c.word,lvl:c.lvl,ok:ok?1:0,conf,guess,points:pts,k:K,created:Date.now()});
