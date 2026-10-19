@@ -280,6 +280,15 @@ body.solo nav,body.solo #hScore,body.solo #hBell,body.solo #hMe,body.solo #wPub{
 .nr b{flex:none;font-weight:700}
 .nr.win b{color:var(--ok)}.nr.lose b{color:var(--bad)}
 .nr.new{background:#FFF8E6}
+.recBtn{margin-top:6px;height:34px;padding:0 12px;border-radius:10px;background:var(--paper2);color:var(--ink);font-weight:600;font-size:14px;display:inline-flex;align-items:center;gap:6px}
+.recBtn .ic{width:16px;height:16px}
+#recC{display:block;width:min(280px,72vw);height:auto;aspect-ratio:1;margin:6px auto 10px;background:#fff;border-radius:16px;box-shadow:var(--sh)}
+.recRes{min-height:58px;text-align:center;font-size:16px;opacity:0;transform:translateY(6px);transition:opacity .35s,transform .35s}
+.recRes.on{opacity:1;transform:none}
+.recRes b{display:block;font-size:22px}
+.recRes.win b{color:var(--ok)}.recRes.lose b{color:var(--bad)}
+.recRow{width:100%;display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--paper2);text-align:right;background:none;font-size:16px}
+.recRow b{flex:1;font-weight:600}.recRow .num{font-weight:700}.recRow.win .num{color:var(--ok)}.recRow.lose .num{color:var(--bad)}
 .nr time{display:block;font-size:12.5px;color:var(--ink3);margin-top:2px}
 
 #toast{position:fixed;top:calc(10px + var(--safeT));left:16px;right:16px;z-index:30;padding:13px 16px;border-radius:16px;background:var(--ink);color:#fff;font-weight:500;font-size:15.5px;box-shadow:var(--sh);transform:translateY(-16px);opacity:0;visibility:hidden;pointer-events:none;transition:transform .35s cubic-bezier(.16,1,.3,1),opacity .25s,visibility 0s .35s;text-align:center}
@@ -461,6 +470,8 @@ bdi{unicode-bidi:isolate;direction:ltr}
 </div>
 <div class="sheet" id="shAsk"><div class="grab"></div><h3 id="askT"></h3><p id="askP" style="color:var(--ink2);font-size:16px"></p><div class="row"><button class="btn grow" id="askNo">ביטול</button><button class="btn pri grow" id="askYes">אישור</button></div></div>
 <div class="sheet tall" id="shPick"><div class="grab"></div><h3>מה ציירת?</h3><div class="search"><label><svg class="ic"><use href="#i-search"/></svg><input id="pickQ" placeholder="חיפוש בכל 300 המילים" enterkeyhint="search"></label></div><div class="list" id="pickGrid"></div></div>
+<div class="sheet" id="shRec"><div class="grab"></div><h3 id="recT"></h3><canvas id="recC" width="280" height="280"></canvas><div class="recRes" id="recRes"></div><div class="row"><button class="btn grow" id="recAgain">שוב</button><button class="btn pri grow" id="recClose">סגירה</button></div></div>
+<div class="sheet tall" id="shRecs"><div class="grab"></div><h3 id="recsT">מי צייר</h3><div class="list" id="recsList"></div></div>
 <div class="sheet" id="shAdd"><div class="grab"></div><h3>מילה משלי</h3><p style="color:var(--ink2);font-size:15px;margin-bottom:10px">מילה אחת בעברית שלא נמצאת במאגר. ניקוד כמו מילה פשוטה.</p><div class="search"><label><svg class="ic"><use href="#i-pen"/></svg><input id="addQ" placeholder="למשל: אגרטל" maxlength="14" enterkeyhint="done" autocomplete="off"></label></div><div class="addErr" id="addErr"></div><div class="row"><button class="btn grow" id="addNo">ביטול</button><button class="btn pri grow" id="addYes">הוספה</button></div></div>
 <div class="sheet tall" id="shMine"><div class="grab"></div><h3 id="mineTitle">המילים שלי</h3><div class="search"><label><svg class="ic"><use href="#i-search"/></svg><input id="mineQ" placeholder="חיפוש במילים שלי"></label></div><div class="list" id="mineList"></div></div>
 <div id="toast"></div>
@@ -727,10 +738,15 @@ function seg(a,b){
  if(curse==='fade'){if(er){gctx.save();gctx.globalCompositeOperation='destination-out';draw(gctx);gctx.restore();}else draw(gctx);}
  if(!er){hasInk=true;padHint.textContent='';inkLen+=Math.hypot(b.x-a.x,b.y-a.y);for(const q of [a,b]){bx0=Math.min(bx0,q.x);by0=Math.min(by0,q.y);bx1=Math.max(bx1,q.x);by1=Math.max(by1,q.y);}if(MODE==='ink'&&cur.view==='vDraw')paintLive();}
 }
-pad.addEventListener('pointerdown',e=>{if(padLocked||curseBlocks())return;pad.setPointerCapture(e.pointerId);drawing=true;strokes++;
+/* הקלטת ציור באתגר: [סוג, x, y, זמן] לכל נקודה. סוג: 0 עט, 1 מחק, 2 נקודה, 3 ניקוי */
+let REC=[],recT0=0;
+function recPush(k,p){if(cur.view!=='vDraw'||REC.length>=16000)return;const t=Date.now(),dt=recT0?Math.min(255,Math.round((t-recT0)/10)):0;recT0=t;
+ REC.push(k,p?Math.max(0,Math.min(255,Math.round(p.x/280*255))):0,p?Math.max(0,Math.min(255,Math.round(p.y/280*255))):0,dt);}
+function recB64(){let s='';for(const v of REC)s+=String.fromCharCode(v);return btoa(s);}
+pad.addEventListener('pointerdown',e=>{if(padLocked||curseBlocks())return;pad.setPointerCapture(e.pointerId);drawing=true;strokes++;recPush(tool==='eraser'?1:0,pos(e));
  if(curse==='time'&&!curseT){curseT=Date.now()+5000;clearInterval(curseTimer);curseTimer=setInterval(()=>{paintCurse();if(Date.now()>curseT){clearInterval(curseTimer);drawing=false;padLocked=true;paintCurse();}},250);}
  last=pos(e);strokeStart=last;if(curse==='straight')strokeSnap=pctx.getImageData(0,0,280,280);seg(last,last);paintCurse();});
-pad.addEventListener('pointermove',e=>{if(!drawing||padLocked||curse==='dots')return;const p=pos(e);
+pad.addEventListener('pointermove',e=>{if(!drawing||padLocked||curse==='dots')return;const p=pos(e);recPush(2,p);
  if(curse==='straight'){pctx.putImageData(strokeSnap,0,0);seg(strokeStart,p);}else seg(last,p);
  last=p;if(onStroke)onStroke(false);});
 const endDraw=()=>{if(!drawing)return;drawing=false;if(onStroke)onStroke(true);};
@@ -747,7 +763,7 @@ function thumb(d,c){c=c||document.createElement('canvas');c.width=c.height=N;con
  for(let i=0;i<IN;i++){const a=d[i]/15;im.data[i*4]=255-a*(255-31);im.data[i*4+1]=255-a*(255-36);im.data[i*4+2]=255-a*(255-64);im.data[i*4+3]=255;}x.putImageData(im,0,0);return c;}
 function setTool(t){tool=t;$$('[data-tool]').forEach(b=>b.classList.toggle('sel',b.dataset.tool===t));}
 $$('[data-tool]').forEach(b=>b.onclick=()=>setTool(b.dataset.tool));
-$$('[data-clear]').forEach(b=>b.onclick=()=>{clearPad();if(onStroke)onStroke(true);});
+$$('[data-clear]').forEach(b=>b.onclick=()=>{recPush(3,null);clearPad();if(onStroke)onStroke(true);});
 function mountPad(view){
  const slot=$(`#${view} [data-pad]`);if(!slot)return;slot.appendChild(padWrap);curse=MODE!=='ink'&&view==='vDraw'&&cur.ch?cur.ch.curse||null:null;startCurseFx();clearPad();setTool('pen');padLocked=false;
  requestAnimationFrame(sizePad);
@@ -985,13 +1001,14 @@ function renderSquareList(){
    const m=r.querySelector('.chMeta');
    if(c.status==='open'){m.innerHTML=`<span class="chSt open">פתוח</span> · ${c.tries} ניסיונות · ${ago(c.created)}`;const x=document.createElement('button');x.className='xBtn';x.setAttribute('aria-label','הסרת האתגר');x.innerHTML='<svg class="ic"><use href="#i-x"/></svg>';x.onclick=async()=>{if(!await ask(`להסיר את "${c.word}" מהכיכר?`,'שחקנים כבר לא יוכלו לנסות אותה.','הסרה'))return;try{await api('challenge/'+c.id,{method:'DELETE'});await loadMine();}catch(e){toast(e.message);}};r.appendChild(x);}
    else{m.innerHTML=`<span class="chSt solved">נפתר</span> · <span class="s"></span> · ${c.tries} ניסיונות`;m.querySelector('.s').textContent='ע״י '+(c.solver||'');}
+   if(c.tries>0){const v=document.createElement('button');v.className='recBtn';v.innerHTML='<svg class="ic"><use href="#i-pen"/></svg>צפה בציורים';v.onclick=()=>openRecs(c);r.querySelector('.grow').appendChild(v);}
    box.appendChild(r);});
  }
 }
 
 /* ---------- ציור אתגר ---------- */
 function renderDraw(){
- const c=cur.ch;$('#vDraw').className='view on lv'+c.lvl;$('#dRes').classList.add('hide');
+ const c=cur.ch;$('#vDraw').className='view on lv'+c.lvl;$('#dRes').classList.add('hide');REC=[];recT0=0;
  $('#dWord').textContent=c.word;$('#dPts').className='chPts'+(MODE==='ink'?' live':'');liveShown=-1;if(MODE==='ink')paintLive();else $('#dPts').innerHTML=`${c.max}<small>עד</small>`;
  $('#dSub').textContent=`המוח של ${c.owner} ישפוט · ${c.k} מילים · ${c.n} ${c.n===1?'ציור':'ציורים'} · מכפיל ${c.mult} · ניסיון אחד`;paintCurse();
  $('#dSend').disabled=false;$('#dSend').innerHTML='<svg class="ic"><use href="#i-send"/></svg>'+SEND_LABEL;
@@ -1000,7 +1017,7 @@ $('#dSend').onclick=async()=>{
  const c=cur.ch,d=grabPad();
  if(!d&&!await ask('הלוח ריק','לשלוח בכל זאת? זה ייחשב ככישלון.','שליחה'))return;
  const b=$('#dSend');b.disabled=true;b.textContent='המוח חושב…';padLocked=true;clearInterval(curseTimer);
- try{const r=await api('attempt',{method:'POST',body:{id:c.id,d:d?dToStr(d):'',L:lastL}});showResult(r,d);refreshMe();}
+ try{const r=await api('attempt',{method:'POST',body:{id:c.id,d:d?dToStr(d):'',L:lastL,rec:REC.length?recB64():''}});showResult(r,d);refreshMe();}
  catch(e){toast(e.message);padLocked=false;b.disabled=false;b.innerHTML='<svg class="ic"><use href="#i-send"/></svg>'+SEND_LABEL;}
 };
 function showResult(r,d){
@@ -1012,6 +1029,53 @@ function showResult(r,d){
  const mini=box.querySelector('.mini');if(d)thumb(d,mini);else mini.remove();
  box.querySelector('#resBack').onclick=()=>{cur.stack=[];go('vSquare',false);};
 }
+
+/* ---------- צפייה בציור של מי שניסה את האתגר ---------- */
+let recRAF=0,recCur=null;
+async function openRecs(c){
+ $('#recsT').textContent=`מי צייר את "${c.word}"`;const box=$('#recsList');box.innerHTML='<div class="nr">טוען…</div>';openSheet('#shRecs');
+ try{const {attempts}=await api('recs?c='+encodeURIComponent(c.id));box.innerHTML='';
+  if(!attempts.length){box.innerHTML='<div class="nr">עוד אין ניסיונות</div>';return;}
+  if(attempts.length===1){playRec(attempts[0].id);return;}
+  attempts.forEach(a=>{const b=document.createElement('button');b.className='recRow '+(a.ok?'win':'lose');b.innerHTML=`<svg class="ic"><use href="#i-pen"/></svg><b></b><span class="num">${sgn(a.points)}</span>`;b.querySelector('b').textContent=(a.bot?'🤖 ':'')+a.drawer+' · '+ago(a.created);b.onclick=()=>playRec(a.id);box.appendChild(b);});
+ }catch(e){box.innerHTML='';toast(e.message);}
+}
+async function playRec(id){
+ closeSheets();openSheet('#shRec');$('#recT').textContent='טוען…';const res=$('#recRes');res.className='recRes';res.innerHTML='';
+ const cv=$('#recC'),x=cv.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,280,280);cancelAnimationFrame(recRAF);
+ try{const {attempt:a}=await api('rec/'+id);recCur=a;runRec();}catch(e){$('#recT').textContent='';toast(e.message);}
+}
+function runRec(){
+ const a=recCur;if(!a)return;cancelAnimationFrame(recRAF);
+ $('#recT').textContent=`${a.bot?'🤖 ':''}${a.drawer} מצייר "${a.word}"…`;
+ const res=$('#recRes');res.className='recRes';res.innerHTML='';
+ const cv=$('#recC'),x=cv.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,280,280);x.lineCap='round';x.lineJoin='round';
+ const done=()=>{$('#recT').textContent=`${a.bot?'🤖 ':''}${a.drawer} צייר "${a.word}"`;
+  const pc=Math.round((a.conf||0)*100),pts=a.ok?a.points:(a.bot?0:a.points);
+  res.className='recRes '+(a.ok?'win':'lose');
+  res.innerHTML=`<b>${a.ok?'המוח שלך זיהה! ✓':'המוח שלך לא זיהה ✗'}</b><span></span> · <span class="num">${sgn(pts)}</span> נקודות`;
+  res.querySelector('span').textContent=a.ok?`ביטחון ${pc}%`:a.guess?`הוא חשב שזה "${a.guess}"`:'לא דומה מספיק לציורים שלך';
+  requestAnimationFrame(()=>res.classList.add('on'));};
+ if(a.rec){
+  const s=atob(a.rec),ev=[];for(let i=0;i+3<s.length;i+=4)ev.push([s.charCodeAt(i),s.charCodeAt(i+1)/255*280,s.charCodeAt(i+2)/255*280,Math.min(60,s.charCodeAt(i+3)*10)]);
+  let i=0,t=0,clock=performance.now(),last=null,er=false;
+  const step=now=>{t+=Math.min(100,now-clock)*1.4;clock=now;
+   while(i<ev.length&&t>=ev[i][3]){const [k,px,py,dt]=ev[i];t-=dt;
+    if(k===3){x.fillStyle='#fff';x.fillRect(0,0,280,280);last=null;}
+    else{const p={x:px,y:py};if(k<2){er=k===1;last=p;}
+     x.strokeStyle=er?'#fff':'#1F2440';x.lineWidth=er?40:18;x.beginPath();x.moveTo(last.x,last.y);x.lineTo(p.x+.01,p.y);x.stroke();last=p;}
+    i++;}
+   if(i<ev.length)recRAF=requestAnimationFrame(step);else setTimeout(done,350);};
+  recRAF=requestAnimationFrame(step);
+ }else if(a.d){
+  // אין הקלטה (למשל מחשב) – הציור מתגלה בהדרגה
+  const v=[...a.d].map(h=>parseInt(h,16)),px=[];v.forEach((q,j)=>{if(q)px.push(j);});px.sort((p,q)=>(p%28+(p/28|0))-(q%28+(q/28|0)));
+  let j=0;const c=280/28;const step=()=>{for(let n=0;n<6&&j<px.length;n++,j++){const q=px[j],g=Math.round(255-v[q]/15*(255-0x24));x.fillStyle=`rgb(${g},${g},${Math.min(255,g+30)})`;x.fillRect((q%28)*c,(q/28|0)*c,c+.5,c+.5);}
+   if(j<px.length)recRAF=requestAnimationFrame(step);else setTimeout(done,350);};recRAF=requestAnimationFrame(step);
+ }else done();
+}
+$('#recAgain').onclick=runRec;
+$('#recClose').onclick=()=>{cancelAnimationFrame(recRAF);closeSheets();};
 
 /* ---------- דירוג ---------- */
 async function renderLeaders(){
@@ -1044,7 +1108,9 @@ $('#hBell').onclick=async()=>{
  openSheet('#shNotes');const box=$('#noteList');box.innerHTML='<div class="nr">טוען…</div>';
  try{const {notes}=await api('notes');box.innerHTML='';
   if(!notes.length)box.innerHTML='<div class="nr">אין עדיין התראות. פרסמו אתגר או נסו אתגר מהכיכר.</div>';
-  notes.forEach(n=>{const r=document.createElement('div');r.className='nr '+(n.points>0?'win':'lose')+(n.seen?'':' new');r.innerHTML=`<b class="num">${sgn(n.points)}</b><div><span></span><time>${ago(n.created)}</time></div>`;r.querySelector('span').textContent=n.text;box.appendChild(r);});
+  notes.forEach(n=>{const r=document.createElement('div');r.className='nr '+(n.points>0?'win':'lose')+(n.seen?'':' new');r.innerHTML=`<b class="num">${sgn(n.points)}</b><div><span></span><time>${ago(n.created)}</time></div>`;r.querySelector('span').textContent=n.text;
+   if(n.aid){const v=document.createElement('button');v.className='recBtn';v.innerHTML='<svg class="ic"><use href="#i-pen"/></svg>צפה בציור';v.onclick=()=>playRec(n.aid);r.querySelector('div').appendChild(v);}
+   box.appendChild(r);});
   await api('notes/seen',{method:'POST'});$('#bellDot').classList.add('hide');
  }catch(e){box.innerHTML='';toast(e.message);}
 };

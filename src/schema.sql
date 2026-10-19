@@ -80,3 +80,13 @@ CREATE TABLE IF NOT EXISTS push_subs (
   created INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS push_p ON push_subs(player_id);
+
+-- הקלטות ציור (נוצרת גם אוטומטית ע"י השרת)
+CREATE TABLE IF NOT EXISTS recs (
+  attempt_id TEXT PRIMARY KEY,
+  ns TEXT NOT NULL,
+  note_id TEXT,
+  rec TEXT,
+  created INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS recs_note ON recs(note_id);

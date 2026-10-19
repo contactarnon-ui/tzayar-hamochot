@@ -113,8 +113,18 @@ async function pushTo(env, playerId, origin) {
   }
 }
 async function note(env, ns, playerId, kind, text, points, ctx, origin) {
-  await env.DB.prepare('INSERT INTO notes(id,ns,player_id,kind,text,points,created) VALUES(?,?,?,?,?,?,?)').bind(uid(), ns, playerId, kind, text, points, now()).run();
+  const id = uid();
+  await env.DB.prepare('INSERT INTO notes(id,ns,player_id,kind,text,points,created) VALUES(?,?,?,?,?,?,?)').bind(id, ns, playerId, kind, text, points, now()).run();
   ctx.waitUntil(pushTo(env, playerId, origin));
+  return id;
+}
+/* הקלטות ציור: נוצרת אוטומטית בפעם הראשונה (בלי צורך לשנות את מסד הנתונים ידנית) */
+let recsReady = false;
+async function ensureRecs(DB) {
+  if (recsReady) return;
+  await DB.prepare('CREATE TABLE IF NOT EXISTS recs (attempt_id TEXT PRIMARY KEY, ns TEXT NOT NULL, note_id TEXT, rec TEXT, created INTEGER NOT NULL)').run();
+  await DB.prepare('CREATE INDEX IF NOT EXISTS recs_note ON recs(note_id)').run();
+  recsReady = true;
 }
 
 /* ---------- Service Worker ---------- */
@@ -196,6 +206,7 @@ async function api(req, env, ctx, url) {
       DB.prepare(`DELETE FROM brains WHERE ns=?`).bind(ns), DB.prepare(`DELETE FROM challenges WHERE ns=?`).bind(ns),
       DB.prepare(`DELETE FROM attempts WHERE ns=?`).bind(ns), DB.prepare(`DELETE FROM notes WHERE ns=?`).bind(ns),
       DB.prepare(`DELETE FROM push_subs WHERE ns=?`).bind(ns), DB.prepare(`DELETE FROM players WHERE ns=?`).bind(ns)]);
+    try { await ensureRecs(DB); await DB.prepare(`DELETE FROM recs WHERE ns=?`).bind(ns).run(); } catch (e) { }
     return json({ ok: true });
   }
 
@@ -209,8 +220,24 @@ async function api(req, env, ctx, url) {
     return json({ me: { id: me.id, name: me.name, code: me.code, score: me.score, rank: rank.r }, notes });
   }
   if (p === '/api/notes') {
-    const { results } = await DB.prepare('SELECT id,kind,text,points,seen,created FROM notes WHERE player_id=? ORDER BY created DESC LIMIT 30').bind(me.id).all();
+    await ensureRecs(DB);
+    const { results } = await DB.prepare('SELECT n.id,n.kind,n.text,n.points,n.seen,n.created,r.attempt_id aid FROM notes n LEFT JOIN recs r ON r.note_id=n.id WHERE n.player_id=? ORDER BY n.created DESC LIMIT 30').bind(me.id).all();
     return json({ notes: results });
+  }
+  // רשימת הניסיונות על אתגר שלי
+  if (p === '/api/recs') {
+    const cid = url.searchParams.get('c') || '';
+    const { results } = await DB.prepare(`SELECT a.id,a.ok,a.points,a.created,d.name drawer,(a.player_id LIKE 'bot_%') bot FROM attempts a JOIN players d ON d.id=a.player_id WHERE a.challenge_id=? AND a.owner_id=? ORDER BY a.created DESC LIMIT 50`).bind(cid, me.id).all();
+    return json({ attempts: results });
+  }
+  // ניסיון אחד + הקלטת הציור
+  const mRec = p.match(/^\/api\/rec\/([\w-]+)$/);
+  if (mRec) {
+    await ensureRecs(DB);
+    const a = await DB.prepare(`SELECT a.id,a.word,a.lvl,a.ok,a.conf,a.guess,a.points,a.d,a.created,a.player_id,a.owner_id,d.name drawer,(a.player_id LIKE 'bot_%') bot,r.rec FROM attempts a JOIN players d ON d.id=a.player_id LEFT JOIN recs r ON r.attempt_id=a.id WHERE a.id=?`).bind(mRec[1]).first();
+    if (!a || (a.owner_id !== me.id && a.player_id !== me.id)) return err('לא נמצא', 404);
+    const { player_id, owner_id, ...rest } = a;
+    return json({ attempt: rest });
   }
   if (p === '/api/notes/seen' && m === 'POST') {
     await DB.prepare('UPDATE notes SET seen=1 WHERE player_id=?').bind(me.id).run();
@@ -294,7 +321,8 @@ async function api(req, env, ctx, url) {
     const c = await DB.prepare(`SELECT c.*,o.name owner FROM challenges c JOIN players o ON o.id=c.owner_id WHERE c.id=? AND c.ns=?`).bind(b.id, ns).first();
     if (!c) return err('האתגר לא נמצא', 404);
     const ds = typeof b.d === 'string' && /^[0-9a-f]{784}$/.test(b.d) ? b.d : null;
-    const r = await runAttempt(env, ns, me, c, ds, +b.L || 0, ctx, origin);
+    const rec = typeof b.rec === 'string' && b.rec.length < 24000 && /^[A-Za-z0-9+/=]*$/.test(b.rec) ? b.rec : null;
+    const r = await runAttempt(env, ns, me, c, ds, +b.L || 0, ctx, origin, rec);
     return r.error ? err(r.error) : json(r);
   }
   return err('לא נמצא', 404);
@@ -303,7 +331,7 @@ async function api(req, env, ctx, url) {
 
 /* ---------- ניסיון אתגר (משותף לשחקנים ולרובוטים) ---------- */
 const isBot = id => typeof id === 'string' && id.startsWith('bot_');
-async function runAttempt(env, ns, me, c, ds, Lin, ctx, origin) {
+async function runAttempt(env, ns, me, c, ds, Lin, ctx, origin, rec = null) {
   const DB = env.DB;
   if (c.owner_id === me.id) return { error: 'אי אפשר לאתגר את המוח של עצמך' };
   if (c.status !== 'open') return { error: c.status === 'solved' ? 'מישהו כבר פתר את האתגר הזה' : 'האתגר נסגר' };
@@ -330,17 +358,20 @@ async function runAttempt(env, ns, me, c, ds, Lin, ctx, origin) {
     const upd = await DB.prepare(`UPDATE challenges SET status='solved',solved_by=?,closed_at=?,tries=tries+1 WHERE id=? AND status='open'`).bind(me.id, now(), c.id).run();
     if (!upd.meta.changes) return { error: 'מישהו פתר את האתגר שנייה לפניך' };
   } else await DB.prepare('UPDATE challenges SET tries=tries+1 WHERE id=?').bind(c.id).run();
+  const aid = uid();
   await DB.batch([
     DB.prepare('INSERT INTO attempts(id,ns,challenge_id,player_id,owner_id,word,lvl,ok,conf,guess,points,k,d,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-      .bind(uid(), ns, c.id, me.id, c.owner_id, c.word, c.lvl, ok ? 1 : 0, conf, guess, pts, K, ds, now()),
+      .bind(aid, ns, c.id, me.id, c.owner_id, c.word, c.lvl, ok ? 1 : 0, conf, guess, pts, K, ds, now()),
     DB.prepare('UPDATE players SET score=score+? WHERE id=?').bind(pts, me.id),
     DB.prepare('UPDATE players SET score=score+? WHERE id=?').bind(ownerPts, c.owner_id)]);
   const pc = Math.round(conf * 100);
   const gain = v => v > 0 ? `קיבלת ${v} נקודות` : v < 0 ? `איבדת ${-v} נקודות` : 'לא הפסדת נקודות';
   const who = isBot(me.id) ? `🤖 ${me.name}` : me.name;
-  if (!isBot(c.owner_id)) await note(env, ns, c.owner_id, ok ? 'win' : 'lose', ok
+  let nid = null;
+  if (!isBot(c.owner_id)) nid = await note(env, ns, c.owner_id, ok ? 'win' : 'lose', ok
     ? `${who} צייר "${c.word}" – המוח שלך זיהה ב־${pc}%. ${gain(ownerPts)}`
     : guess ? `${who} צייר "${c.word}" – המוח שלך חשב שזה "${guess}". ${gain(ownerPts)}` : `${who} צייר "${c.word}" – לא דומה מספיק לציורים שלך. ${gain(ownerPts)}`, ownerPts, ctx, origin);
+  if (!isBot(c.owner_id) && (rec || ds)) { try { await ensureRecs(DB); await DB.prepare('INSERT INTO recs(attempt_id,ns,note_id,rec,created) VALUES(?,?,?,?,?)').bind(aid, ns, nid, rec, now()).run(); } catch (e) { } }
   if (!isBot(me.id)) await note(env, ns, me.id, ok ? 'dwin' : 'dlose', ok
     ? `המוח של ${c.owner} זיהה את "${c.word}" שלך ב־${pc}%. ${gain(pts)}`
     : `המוח של ${c.owner} לא זיהה את "${c.word}" שלך. ${gain(pts)}`, pts, ctx, origin);
